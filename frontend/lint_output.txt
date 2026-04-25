@@ -1,0 +1,37 @@
+
+> frontend@0.0.0 lint
+> eslint .
+
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/button.tsx
+  0:0  error  Parsing error: /home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/button.tsx was not found by the project service. Consider either including it in the tsconfig.json or including it in allowDefaultProject
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/card.tsx
+  0:0  error  Parsing error: /home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/card.tsx was not found by the project service. Consider either including it in the tsconfig.json or including it in allowDefaultProject
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/input.tsx
+  0:0  error  Parsing error: /home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/input.tsx was not found by the project service. Consider either including it in the tsconfig.json or including it in allowDefaultProject
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/label.tsx
+  0:0  error  Parsing error: /home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/label.tsx was not found by the project service. Consider either including it in the tsconfig.json or including it in allowDefaultProject
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/select.tsx
+  0:0  error  Parsing error: /home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/@/components/ui/select.tsx was not found by the project service. Consider either including it in the tsconfig.json or including it in allowDefaultProject
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/src/pages/Landing.tsx
+  177:17  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`  react/no-unescaped-entities
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/src/pages/Login.tsx
+  25:37  warning  Unsafe argument of type `any` assigned to a parameter of type `string`             @typescript-eslint/no-unsafe-argument
+  25:51  error    Unsafe member access .access_token on an `any` value                               @typescript-eslint/no-unsafe-member-access
+  27:58  error    Unsafe member access .user on an `any` value                                       @typescript-eslint/no-unsafe-member-access
+  96:26  error    Promise-returning function provided to attribute where a void return was expected  @typescript-eslint/no-misused-promises
+
+/home/prof-l44lu/Documents/Projects/giglyInnnnn/frontend/src/pages/Signup.tsx
+   27:66  error  Unsafe member access .id on an `any` value                                         @typescript-eslint/no-unsafe-member-access
+   99:26  error  Promise-returning function provided to attribute where a void return was expected  @typescript-eslint/no-misused-promises
+  194:60  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                    react/no-unescaped-entities
+  214:60  error  `'` can be escaped with `&apos;`, `&lsquo;`, `&#39;`, `&rsquo;`                    react/no-unescaped-entities
+
+✖ 14 problems (13 errors, 1 warning)
+

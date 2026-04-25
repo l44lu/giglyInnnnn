@@ -1,0 +1,325 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String            @id @default(uuid())
+  email                String            @unique
+  passwordHash         String
+  role                 Role              @default(WORKER)
+  firstName            String
+  lastName             String
+  phone                String?
+  avatarUrl            String?
+  location             String?
+  bio                  String?
+  isVerified           Boolean           @default(false)
+  isBlocked            Boolean           @default(false)
+  isActive             Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  adminActions         AdminAction[]     @relation("AdminActions")
+  targetedAdminActions AdminAction[]     @relation("TargetAdminActions")
+  conversationsAsUser1 Conversation[]    @relation("Participant1")
+  conversationsAsUser2 Conversation[]    @relation("Participant2")
+  messages             Message[]
+  notifications        Notification[]
+  platformSettings     PlatformSetting[]
+  recruiterProfile     RecruiterProfile?
+  reportsAgainstUser   Report[]          @relation("ReportedUserReports")
+  filedReports         Report[]          @relation("ReporterReports")
+  resolvedReports      Report[]          @relation("ResolvedReports")
+  receivedReviews      Review[]          @relation("RevieweeReviews")
+  givenReviews         Review[]          @relation("ReviewerReviews")
+  receivedTransactions Transaction[]     @relation("PayeeTransactions")
+  paidTransactions     Transaction[]     @relation("PayerTransactions")
+  workerProfile        WorkerProfile?
+}
+
+model Company {
+  id                   String             @id @default(uuid())
+  name                 String
+  industry             String?
+  companySize          String?
+  website              String?
+  headquartersLocation String?
+  about                String?
+  logoUrl              String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+  recruiterProfiles    RecruiterProfile[]
+}
+
+model RecruiterProfile {
+  id               String                   @id @default(uuid())
+  userId           String                   @unique
+  companyId        String?
+  roleTitle        String?
+  yearsExperience  Int?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+  jobPosts         JobPost[]
+  company          Company?                 @relation(fields: [companyId], references: [id])
+  user             User                     @relation(fields: [userId], references: [id])
+  savedWorkers     SavedWorker[]
+  connectedWorkers WorkerClientConnection[]
+}
+
+model WorkerProfile {
+  id                  String                   @id @default(uuid())
+  userId              String                   @unique
+  headline            String?
+  yearsExperience     Int?
+  responseTimeHours   Int?
+  availabilityStatus  String                   @default("available")
+  isOpenToWork        Boolean                  @default(true)
+  totalCompletedGigs  Int                      @default(0)
+  memberSince         DateTime?                @db.Date
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  applications        JobApplication[]
+  savedByRecruiters   SavedWorker[]
+  connectedRecruiters WorkerClientConnection[]
+  user                User                     @relation(fields: [userId], references: [id])
+  skills              WorkerSkill[]
+}
+
+model Skill {
+  id            String         @id @default(uuid())
+  name          String         @unique
+  createdAt     DateTime       @default(now())
+  jobPostSkills JobPostSkill[]
+  workerSkills  WorkerSkill[]
+}
+
+model WorkerSkill {
+  id        String        @id @default(uuid())
+  workerId  String
+  skillId   String
+  skillType String
+  skill     Skill         @relation(fields: [skillId], references: [id])
+  worker    WorkerProfile @relation(fields: [workerId], references: [id])
+
+  @@unique([workerId, skillId])
+}
+
+model JobCategory {
+  id          String    @id @default(uuid())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  jobPosts    JobPost[]
+}
+
+model JobPost {
+  id                String           @id @default(uuid())
+  recruiterId       String
+  categoryId        String
+  title             String
+  description       String
+  workType          String
+  workersNeeded     Int              @default(1)
+  startDate         DateTime?
+  estimatedDuration String?
+  shiftDuration     String?
+  jobLocation       String?
+  jobLocationLat    Decimal?         @db.Decimal(9, 6)
+  jobLocationLng    Decimal?         @db.Decimal(9, 6)
+  paymentStructure  String
+  budgetAmount      Decimal?         @db.Decimal(10, 2)
+  hourlyRateMin     Decimal?         @db.Decimal(10, 2)
+  hourlyRateMax     Decimal?         @db.Decimal(10, 2)
+  status            String           @default("draft")
+  isBoosted         Boolean          @default(false)
+  boostExpiresAt    DateTime?
+  adminReviewStatus String           @default("pending")
+  adminNotes        String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  adminActions      AdminAction[]
+  conversations     Conversation[]
+  applications      JobApplication[]
+  category          JobCategory      @relation(fields: [categoryId], references: [id])
+  recruiter         RecruiterProfile @relation(fields: [recruiterId], references: [id])
+  skills            JobPostSkill[]
+  reports           Report[]
+  reviews           Review[]
+  transactions      Transaction[]
+}
+
+model JobPostSkill {
+  id        String  @id @default(uuid())
+  jobPostId String
+  skillId   String
+  jobPost   JobPost @relation(fields: [jobPostId], references: [id])
+  skill     Skill   @relation(fields: [skillId], references: [id])
+
+  @@unique([jobPostId, skillId])
+}
+
+model JobApplication {
+  id            String        @id @default(uuid())
+  jobPostId     String
+  workerId      String
+  status        String        @default("pending")
+  expectedPay   Decimal?      @db.Decimal(10, 2)
+  availableDate DateTime?     @db.Date
+  appliedAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  jobPost       JobPost       @relation(fields: [jobPostId], references: [id])
+  worker        WorkerProfile @relation(fields: [workerId], references: [id])
+  transactions  Transaction[]
+}
+
+model Transaction {
+  id               String         @id @default(uuid())
+  jobPostId        String
+  applicationId    String
+  payerId          String
+  payeeId          String
+  amount           Decimal        @db.Decimal(10, 2)
+  paymentStructure String
+  status           String         @default("pending")
+  paymentMethod    String?
+  receiptUrl       String?
+  paidAt           DateTime?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  application      JobApplication @relation(fields: [applicationId], references: [id])
+  jobPost          JobPost        @relation(fields: [jobPostId], references: [id])
+  payee            User           @relation("PayeeTransactions", fields: [payeeId], references: [id])
+  payer            User           @relation("PayerTransactions", fields: [payerId], references: [id])
+}
+
+model Conversation {
+  id             String    @id @default(uuid())
+  participant1Id String
+  participant2Id String
+  jobPostId      String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  jobPost        JobPost?  @relation(fields: [jobPostId], references: [id])
+  participant1   User      @relation("Participant1", fields: [participant1Id], references: [id])
+  participant2   User      @relation("Participant2", fields: [participant2Id], references: [id])
+  messages       Message[]
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  senderId       String
+  content        String
+  attachmentUrl  String?
+  isRead         Boolean      @default(false)
+  sentAt         DateTime     @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  sender         User         @relation(fields: [senderId], references: [id])
+}
+
+model Review {
+  id           String   @id @default(uuid())
+  reviewerId   String
+  revieweeId   String
+  jobPostId    String
+  reviewerType String
+  rating       Decimal  @db.Decimal(2, 1)
+  feedbackText String?
+  isPublic     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  jobPost      JobPost  @relation(fields: [jobPostId], references: [id])
+  reviewee     User     @relation("RevieweeReviews", fields: [revieweeId], references: [id])
+  reviewer     User     @relation("ReviewerReviews", fields: [reviewerId], references: [id])
+}
+
+model Report {
+  id              String        @id @default(uuid())
+  displayId       String        @unique
+  reporterId      String
+  reportedUserId  String
+  jobPostId       String?
+  reportType      String
+  description     String
+  evidenceFileUrl String?
+  status          String        @default("pending")
+  adminNotes      String?
+  resolvedBy      String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  adminActions    AdminAction[]
+  jobPost         JobPost?      @relation(fields: [jobPostId], references: [id])
+  reportedUser    User          @relation("ReportedUserReports", fields: [reportedUserId], references: [id])
+  reporter        User          @relation("ReporterReports", fields: [reporterId], references: [id])
+  resolver        User?         @relation("ResolvedReports", fields: [resolvedBy], references: [id])
+}
+
+model WorkerClientConnection {
+  id           String           @id @default(uuid())
+  workerId     String
+  recruiterId  String
+  status       String           @default("accepted")
+  connectedAt  DateTime         @default(now())
+  lastWorkedAt DateTime?
+  recruiter    RecruiterProfile @relation(fields: [recruiterId], references: [id])
+  worker       WorkerProfile    @relation(fields: [workerId], references: [id])
+
+  @@unique([workerId, recruiterId])
+}
+
+model SavedWorker {
+  id          String           @id @default(uuid())
+  recruiterId String
+  workerId    String
+  savedAt     DateTime         @default(now())
+  recruiter   RecruiterProfile @relation(fields: [recruiterId], references: [id])
+  worker      WorkerProfile    @relation(fields: [workerId], references: [id])
+
+  @@unique([recruiterId, workerId])
+}
+
+model AdminAction {
+  id              String   @id @default(uuid())
+  adminId         String
+  targetUserId    String?
+  targetJobPostId String?
+  targetReportId  String?
+  actionType      String
+  notes           String?
+  createdAt       DateTime @default(now())
+  admin           User     @relation("AdminActions", fields: [adminId], references: [id])
+  jobPost         JobPost? @relation(fields: [targetJobPostId], references: [id])
+  report          Report?  @relation(fields: [targetReportId], references: [id])
+  targetUser      User?    @relation("TargetAdminActions", fields: [targetUserId], references: [id])
+}
+
+model Notification {
+  id            String   @id @default(uuid())
+  userId        String
+  type          String
+  title         String
+  body          String?
+  isRead        Boolean  @default(false)
+  referenceId   String?
+  referenceType String?
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id])
+}
+
+model PlatformSetting {
+  id           String   @id @default(uuid())
+  settingKey   String   @unique
+  settingValue String?
+  updatedBy    String?
+  updatedAt    DateTime @updatedAt
+  updater      User?    @relation(fields: [updatedBy], references: [id])
+}
+
+enum Role {
+  ADMIN
+  RECRUITER
+  WORKER
+}
