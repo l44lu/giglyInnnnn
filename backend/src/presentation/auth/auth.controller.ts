@@ -1,12 +1,8 @@
 import { Controller, Post, Body } from '@nestjs/common';
-import type {
-  RegisterUseCase,
-  RegisterInput,
-} from 'src/application/auth/register.use-case';
-import type {
-  LoginUseCase,
-  LoginInput,
-} from 'src/application/auth/login.use-case';
+import { RegisterUseCase } from 'src/application/auth/register.use-case';
+import type { RegisterInput } from 'src/application/auth/register.use-case';
+import { LoginUseCase } from 'src/application/auth/login.use-case';
+import type { LoginInput } from 'src/application/auth/login.use-case';
 
 @Controller('auth')
 export class AuthController {
