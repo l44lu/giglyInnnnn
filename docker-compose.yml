@@ -23,6 +23,8 @@ services:
       DATABASE_URL: "postgresql://postgres:password@db:5432/gigly"
     depends_on:
       - db
+    volumes:
+      - ./backend/logs:/app/logs
     env_file:
       - ./backend/.env
 
