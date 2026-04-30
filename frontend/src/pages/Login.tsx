@@ -16,7 +16,7 @@ const Login = () => {
     try {
       // gotta move the url to .env file make sure to do it
       const response = await axios.post(
-        "http://localhost:3000/auth/login",
+        `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/login`,
         formData,
       );
       //=======================================================================================================================================

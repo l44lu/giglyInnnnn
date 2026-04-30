@@ -1,11 +1,40 @@
 services:
+  db:
+    image: postgres:15-alpine
+    container_name: gigly_db
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: gigly
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: gigly_backend
     ports:
       - "3000:3000"
-    env_file: ./backend/.env
+    environment:
+      DATABASE_URL: "postgresql://postgres:password@db:5432/gigly"
+    depends_on:
+      - db
+    env_file:
+      - ./backend/.env
 
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: gigly_frontend
     ports:
       - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
