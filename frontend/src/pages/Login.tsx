@@ -14,14 +14,10 @@ const Login = () => {
     e.preventDefault();
     setIsLoading(true);
     try {
-      // gotta move the url to .env file make sure to do it
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/login`,
         formData,
       );
-      //=======================================================================================================================================
-      //not a good practice to store the jwt in the localstorage so gotta change to Access token in memory + Refresh token in HttpOnly cookie
-      //=======================================================================================================================================
       const data = response.data as {
         access_token: string;
         user: { firstName: string };
