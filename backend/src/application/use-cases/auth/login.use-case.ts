@@ -4,11 +4,9 @@ import { IRefreshTokenRepository } from '../../../domain/repositories/refresh-to
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-
-export interface LoginInput {
-  password: string;
-  email: string;
-}
+import { LoginInputDto } from '../../dto/auth/login-input.dto';
+import { AuthResponseDto } from '../../dto/auth/auth-response.dto';
+import { UserMapper } from '../../mappers/user.mapper';
 
 @Injectable()
 export class LoginUseCase {
@@ -20,7 +18,7 @@ export class LoginUseCase {
     private configService: ConfigService,
   ) {}
 
-  async execute(data: LoginInput) {
+  async execute(data: LoginInputDto): Promise<AuthResponseDto> {
     // find user by email
     const user = await this.userRepository.findByEmail(data.email);
 
@@ -66,12 +64,7 @@ export class LoginUseCase {
     return {
       access_token,
       refresh_token,
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        firstName: user.firstName,
-      },
+      user: UserMapper.toResponseDto(user),
     };
   }
 }

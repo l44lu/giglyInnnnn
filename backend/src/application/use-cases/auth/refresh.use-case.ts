@@ -3,10 +3,8 @@ import { IUserRepository } from '../../../domain/repositories/user.repository.in
 import { IRefreshTokenRepository } from '../../../domain/repositories/refresh-token.repository.interface';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-
-export interface RefreshInput {
-  refresh_token: string;
-}
+import { RefreshInputDto } from '../../dto/auth/refresh-input.dto';
+import { RefreshResponseDto } from '../../dto/auth/refresh-response.dto';
 
 @Injectable()
 export class RefreshUseCase {
@@ -18,7 +16,7 @@ export class RefreshUseCase {
     private configService: ConfigService,
   ) {}
 
-  async execute(data: RefreshInput) {
+  async execute(data: RefreshInputDto): Promise<RefreshResponseDto> {
     if (!data.refresh_token) {
       throw new UnauthorizedException('Refresh token is required');
     }
