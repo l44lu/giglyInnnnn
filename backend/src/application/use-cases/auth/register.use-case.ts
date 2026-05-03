@@ -1,7 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Inject } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
+import { IUserRepository } from '../../../domain/repositories/user.repository.interface';
+
 //using "any" is not type safe so creating an interface to act along with it
 export interface RegisterInput {
   password: string;
@@ -13,21 +14,21 @@ export interface RegisterInput {
 
 @Injectable()
 export class RegisterUseCase {
-  constructor(private prisma: PrismaService) {}
+  constructor(
+    @Inject(IUserRepository) private userRepository: IUserRepository,
+  ) {}
 
   async execute(data: RegisterInput) {
     //hash the password (security first!!!!!!!!!!!!!!!!!!!!!)
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
     //save to database using our Infrastructure tool
-    const user = await this.prisma.user.create({
-      data: {
-        email: data.email,
-        passwordHash: hashedPassword,
-        firstName: data.firstName,
-        lastName: data.lastName,
-        role: data.role,
-      },
+    const user = await this.userRepository.create({
+      email: data.email,
+      passWordHash: hashedPassword,
+      firstName: data.firstName,
+      lastName: data.lastName,
+      role: data.role,
     });
 
     return user;
