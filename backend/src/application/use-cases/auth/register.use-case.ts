@@ -1,16 +1,9 @@
 import { Injectable, Inject } from '@nestjs/common';
-import { Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { IUserRepository } from '../../../domain/repositories/user.repository.interface';
-
-//using "any" is not type safe so creating an interface to act along with it
-export interface RegisterInput {
-  password: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-  role?: Role;
-}
+import { RegisterInputDto } from '../../dto/auth/register-input.dto';
+import { UserResponseDto } from '../../dto/user/user-response.dto';
+import { UserMapper } from '../../mappers/user.mapper';
 
 @Injectable()
 export class RegisterUseCase {
@@ -18,7 +11,7 @@ export class RegisterUseCase {
     @Inject(IUserRepository) private userRepository: IUserRepository,
   ) {}
 
-  async execute(data: RegisterInput) {
+  async execute(data: RegisterInputDto): Promise<UserResponseDto> {
     //hash the password (security first!!!!!!!!!!!!!!!!!!!!!)
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
@@ -31,6 +24,6 @@ export class RegisterUseCase {
       role: data.role,
     });
 
-    return user;
+    return UserMapper.toResponseDto(user);
   }
 }
