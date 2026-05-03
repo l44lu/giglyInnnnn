@@ -1,5 +1,6 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
+import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
+import { IUserRepository } from '../../../domain/repositories/user.repository.interface';
+import { IRefreshTokenRepository } from '../../../domain/repositories/refresh-token.repository.interface';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
@@ -10,7 +11,9 @@ export interface RefreshInput {
 @Injectable()
 export class RefreshUseCase {
   constructor(
-    private prisma: PrismaService,
+    @Inject(IUserRepository) private userRepository: IUserRepository,
+    @Inject(IRefreshTokenRepository)
+    private refreshTokenRepository: IRefreshTokenRepository,
     private jwtService: JwtService,
     private configService: ConfigService,
   ) {}
@@ -30,18 +33,16 @@ export class RefreshUseCase {
       );
 
       // this section check if the token exists in the database or not
-      const savedToken = await this.prisma.refreshToken.findUnique({
-        where: { token: data.refresh_token },
-      });
+      const savedToken = await this.refreshTokenRepository.findByToken(
+        data.refresh_token,
+      );
 
       if (!savedToken) {
         throw new UnauthorizedException('Invalid or revoked refresh token');
       }
 
       // finding the user
-      const user = await this.prisma.user.findUnique({
-        where: { id: payload.sub },
-      });
+      const user = await this.userRepository.findById(payload.sub);
 
       if (!user) {
         throw new UnauthorizedException('User not found');

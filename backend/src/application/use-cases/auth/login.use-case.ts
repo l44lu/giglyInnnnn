@@ -1,5 +1,6 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { PrismaService } from '../../../infrastructure/prisma/prisma.service';
+import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
+import { IUserRepository } from '../../../domain/repositories/user.repository.interface';
+import { IRefreshTokenRepository } from '../../../domain/repositories/refresh-token.repository.interface';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
@@ -12,35 +13,35 @@ export interface LoginInput {
 @Injectable()
 export class LoginUseCase {
   constructor(
-    private prisma: PrismaService,
+    @Inject(IUserRepository) private userRepository: IUserRepository,
+    @Inject(IRefreshTokenRepository)
+    private refreshTokenRepository: IRefreshTokenRepository,
     private jwtService: JwtService,
     private configService: ConfigService,
   ) {}
 
   async execute(data: LoginInput) {
-    // 1. Find user by email
-    const user = await this.prisma.user.findUnique({
-      where: { email: data.email },
-    });
+    // find user by email
+    const user = await this.userRepository.findByEmail(data.email);
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
-
+    // check if the password is valid
     const isPasswordValid = await bcrypt.compare(
       data.password,
-      user.passwordHash,
+      user.passWordHash,
     );
 
     if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // 3. Generate the "Wristband" (JWT)
+    // generate the token
     const payload = { sub: user.id, email: user.email, role: user.role };
     const access_token = await this.jwtService.signAsync(payload);
 
-    // 4. Generate Refresh Token
+    // generate refresh token
     const refresh_token = await this.jwtService.signAsync(
       { sub: user.id },
       {
@@ -50,18 +51,16 @@ export class LoginUseCase {
       },
     );
 
-    // Calculate expiration date for DB (assuming 7d based on .env)
+    // calculate expiration date from DB already mentioned in the .env but still gotta be sure uk :)
     const expiresInDays = 7;
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + expiresInDays);
 
-    // 5. Save Refresh Token to Database
-    await this.prisma.refreshToken.create({
-      data: {
-        token: refresh_token,
-        userId: user.id,
-        expiresAt,
-      },
+    // save refresh token to db
+    await this.refreshTokenRepository.create({
+      token: refresh_token,
+      userId: user.id,
+      expiresAt,
     });
 
     return {
