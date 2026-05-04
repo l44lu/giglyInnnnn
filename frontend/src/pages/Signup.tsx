@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
+import Swal from "sweetalert2";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -59,14 +60,22 @@ const Signup = () => {
         sanitizedData,
       );
       const data = response.data as { id: string };
-      alert("Registration Successful! User ID: " + data.id);
+      await Swal.fire({
+        icon: "success",
+        title: "Registration Successful!",
+        text: "User ID: " + data.id,
+      });
     } catch (error: unknown) {
       console.error(error);
       let message: string | string[] = "Registration Failed.";
       if (axios.isAxiosError<{ message: string | string[] }>(error)) {
         message = error.response?.data?.message || message;
       }
-      alert(Array.isArray(message) ? message.join(", ") : message);
+      await Swal.fire({
+        icon: "error",
+        title: "Registration Failed",
+        text: Array.isArray(message) ? message.join(", ") : message,
+      });
     } finally {
       setIsLoading(false);
     }

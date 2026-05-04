@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import Swal from "sweetalert2";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -46,14 +47,24 @@ const Login = () => {
       };
       localStorage.setItem("token", data.access_token);
 
-      alert("Login Successful! Welcome " + data.user.firstName);
+      await Swal.fire({
+        icon: "success",
+        title: "Login Successful",
+        text: "Welcome " + data.user.firstName,
+        timer: 2000,
+        showConfirmButton: false,
+      });
     } catch (error: unknown) {
       console.error(error);
       let message: string | string[] = "Login Failed. Check credentials.";
       if (axios.isAxiosError<{ message: string | string[] }>(error)) {
         message = error.response?.data?.message || message;
       }
-      alert(Array.isArray(message) ? message.join(", ") : message);
+      await Swal.fire({
+        icon: "error",
+        title: "Login Failed",
+        text: Array.isArray(message) ? message.join(", ") : message,
+      });
     } finally {
       setIsLoading(false);
     }
