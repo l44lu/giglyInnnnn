@@ -14,15 +14,19 @@ const Login = () => {
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
+
     if (!formData.email.trim()) {
       newErrors.email = "Email is required";
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
       newErrors.email = "Email is invalid";
     }
+
     if (!formData.password) {
       newErrors.password = "Password is required";
     }
+
     setErrors(newErrors);
+
     return Object.keys(newErrors).length === 0;
   };
 
@@ -31,6 +35,7 @@ const Login = () => {
     if (!validateForm()) return;
 
     setIsLoading(true);
+
     try {
       const sanitizedData = {
         ...formData,
@@ -41,29 +46,34 @@ const Login = () => {
         `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/login`,
         sanitizedData,
       );
+
       const data = response.data as {
         access_token: string;
         user: { firstName: string };
       };
-      localStorage.setItem("token", data.access_token);
 
+      localStorage.setItem("token", data.access_token);
       await Swal.fire({
         icon: "success",
         title: "Login Successful",
-        text: "Welcome " + data.user.firstName,
+        text: "Welcome Back " + data.user.firstName,
         timer: 2000,
         showConfirmButton: false,
+        confirmButtonColor: "#2563eb",
       });
     } catch (error: unknown) {
       console.error(error);
       let message: string | string[] = "Login Failed. Check credentials.";
+
       if (axios.isAxiosError<{ message: string | string[] }>(error)) {
         message = error.response?.data?.message || message;
       }
+
       await Swal.fire({
         icon: "error",
         title: "Login Failed",
         text: Array.isArray(message) ? message.join(", ") : message,
+        confirmButtonColor: "#2563eb",
       });
     } finally {
       setIsLoading(false);

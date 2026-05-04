@@ -59,22 +59,29 @@ const Signup = () => {
         `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/register`,
         sanitizedData,
       );
-      const data = response.data as { id: string };
+
+      const data = response.data as { id: string; firstName: string };
+
       await Swal.fire({
         icon: "success",
         title: "Registration Successful!",
-        text: "User ID: " + data.id,
+        text: "Welcome to Gigly " + (data.firstName || formData.firstName),
+        confirmButtonColor: "#2563eb",
       });
     } catch (error: unknown) {
       console.error(error);
+
       let message: string | string[] = "Registration Failed.";
+
       if (axios.isAxiosError<{ message: string | string[] }>(error)) {
         message = error.response?.data?.message || message;
       }
+
       await Swal.fire({
         icon: "error",
         title: "Registration Failed",
         text: Array.isArray(message) ? message.join(", ") : message,
+        confirmButtonColor: "#2563eb",
       });
     } finally {
       setIsLoading(false);
