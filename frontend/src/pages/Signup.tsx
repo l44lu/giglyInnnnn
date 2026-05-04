@@ -14,21 +14,59 @@ const Signup = () => {
     lastName: "",
     role: "WORKER",
   });
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+    // form validation rechecking required do check
+    if (!formData.firstName.trim())
+      newErrors.firstName = "First name is required";
+    if (!formData.lastName.trim()) newErrors.lastName = "Last name is required";
+
+    if (!formData.email.trim()) {
+      newErrors.email = "Email is required";
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = "Email is invalid";
+    }
+
+    if (!formData.password) {
+      newErrors.password = "Password is required";
+    } else if (formData.password.length < 8) {
+      newErrors.password = "Password must be at least 8 characters";
+    }
+
+    setErrors(newErrors);
+
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validateForm()) return;
+
     setIsLoading(true);
     try {
+      const sanitizedData = {
+        ...formData,
+        email: formData.email.trim().toLowerCase(),
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+      };
+
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/register`,
-        formData,
+        sanitizedData,
       );
       const data = response.data as { id: string };
       alert("Registration Successful! User ID: " + data.id);
-    } catch (error) {
+    } catch (error: unknown) {
       console.error(error);
-      alert("Registration Failed. Check terminal.");
+      let message: string | string[] = "Registration Failed.";
+      if (axios.isAxiosError<{ message: string | string[] }>(error)) {
+        message = error.response?.data?.message || message;
+      }
+      alert(Array.isArray(message) ? message.join(", ") : message);
     } finally {
       setIsLoading(false);
     }
@@ -116,10 +154,17 @@ const Signup = () => {
                   placeholder="John"
                   required
                   className="bg-white border-slate-200 focus-visible:ring-blue-500 h-11"
-                  onChange={(e) =>
-                    setFormData({ ...formData, firstName: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setFormData({ ...formData, firstName: e.target.value });
+                    if (errors.firstName)
+                      setErrors({ ...errors, firstName: "" });
+                  }}
                 />
+                {errors.firstName && (
+                  <p className="text-red-500 text-xs mt-1">
+                    {errors.firstName}
+                  </p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label
@@ -133,10 +178,14 @@ const Signup = () => {
                   placeholder="Doe"
                   required
                   className="bg-white border-slate-200 focus-visible:ring-blue-500 h-11"
-                  onChange={(e) =>
-                    setFormData({ ...formData, lastName: e.target.value })
-                  }
+                  onChange={(e) => {
+                    setFormData({ ...formData, lastName: e.target.value });
+                    if (errors.lastName) setErrors({ ...errors, lastName: "" });
+                  }}
                 />
+                {errors.lastName && (
+                  <p className="text-red-500 text-xs mt-1">{errors.lastName}</p>
+                )}
               </div>
             </div>
 
@@ -153,10 +202,14 @@ const Signup = () => {
                 placeholder="name@example.com"
                 required
                 className="bg-white border-slate-200 focus-visible:ring-blue-500 h-11"
-                onChange={(e) =>
-                  setFormData({ ...formData, email: e.target.value })
-                }
+                onChange={(e) => {
+                  setFormData({ ...formData, email: e.target.value });
+                  if (errors.email) setErrors({ ...errors, email: "" });
+                }}
               />
+              {errors.email && (
+                <p className="text-red-500 text-xs mt-1">{errors.email}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -174,10 +227,14 @@ const Signup = () => {
                 placeholder="Create a secure password"
                 required
                 className="bg-white border-slate-200 focus-visible:ring-blue-500 h-11"
-                onChange={(e) =>
-                  setFormData({ ...formData, password: e.target.value })
-                }
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  if (errors.password) setErrors({ ...errors, password: "" });
+                }}
               />
+              {errors.password && (
+                <p className="text-red-500 text-xs mt-1">{errors.password}</p>
+              )}
             </div>
 
             <div className="pt-2">
