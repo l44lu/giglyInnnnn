@@ -1,15 +1,17 @@
 import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
-import { IUserRepository } from '../../../domain/repositories/user.repository.interface';
-import { IRefreshTokenRepository } from '../../../domain/repositories/refresh-token.repository.interface';
+import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
+import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { JwtService, JwtSignOptions } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
-import { LoginInputDto } from '../../dto/auth/login-input.dto';
-import { AuthResponseDto } from '../../dto/auth/auth-response.dto';
-import { UserMapper } from '../../mappers/user.mapper';
+import { LoginInputDto } from '../../../dto/auth/login-input.dto';
+import { AuthResponseDto } from '../../../dto/auth/auth-response.dto';
+import { UserMapper } from '../../../mappers/user.mapper';
+
+import { ILoginUseCase } from '../interface/login.use-case.interface';
 
 @Injectable()
-export class LoginUseCase {
+export class LoginUseCase implements ILoginUseCase {
   constructor(
     @Inject(IUserRepository) private userRepository: IUserRepository,
     @Inject(IRefreshTokenRepository)

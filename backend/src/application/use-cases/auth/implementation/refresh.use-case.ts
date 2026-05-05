@@ -1,13 +1,15 @@
 import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
-import { IUserRepository } from '../../../domain/repositories/user.repository.interface';
-import { IRefreshTokenRepository } from '../../../domain/repositories/refresh-token.repository.interface';
+import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
+import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { RefreshInputDto } from '../../dto/auth/refresh-input.dto';
-import { RefreshResponseDto } from '../../dto/auth/refresh-response.dto';
+import { RefreshInputDto } from '../../../dto/auth/refresh-input.dto';
+import { RefreshResponseDto } from '../../../dto/auth/refresh-response.dto';
+
+import { IRefreshUseCase } from '../interface/refresh.use-case.interface';
 
 @Injectable()
-export class RefreshUseCase {
+export class RefreshUseCase implements IRefreshUseCase {
   constructor(
     @Inject(IUserRepository) private userRepository: IUserRepository,
     @Inject(IRefreshTokenRepository)

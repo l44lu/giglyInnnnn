@@ -1,12 +1,14 @@
 import { Injectable, Inject } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
-import { IUserRepository } from '../../../domain/repositories/user.repository.interface';
-import { RegisterInputDto } from '../../dto/auth/register-input.dto';
-import { UserResponseDto } from '../../dto/user/user-response.dto';
-import { UserMapper } from '../../mappers/user.mapper';
+import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
+import { RegisterInputDto } from '../../../dto/auth/register-input.dto';
+import { UserResponseDto } from '../../../dto/user/user-response.dto';
+import { UserMapper } from '../../../mappers/user.mapper';
+
+import { IRegisterUseCase } from '../interface/register.use-case.interface';
 
 @Injectable()
-export class RegisterUseCase {
+export class RegisterUseCase implements IRegisterUseCase {
   constructor(
     @Inject(IUserRepository) private userRepository: IUserRepository,
   ) {}
