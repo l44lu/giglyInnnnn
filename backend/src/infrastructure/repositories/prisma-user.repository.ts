@@ -3,12 +3,18 @@ import { IUserRepository } from '../../domain/repositories/user.repository.inter
 import { UserEntities } from '../../domain/entities/user.entities';
 import { PrismaService } from '../prisma/prisma.service';
 import { User } from '@prisma/client';
+import { PrismaBaseRepository } from './base.repository';
 
 @Injectable()
-export class PrismaUserRepository implements IUserRepository {
-  constructor(private prisma: PrismaService) {}
+export class PrismaUserRepository
+  extends PrismaBaseRepository<UserEntities, User>
+  implements IUserRepository
+{
+  constructor(prisma: PrismaService) {
+    super(prisma, prisma.user);
+  }
 
-  private mapToDomain(user: User): UserEntities {
+  protected mapToDomain(user: User): UserEntities {
     return new UserEntities({
       id: user.id,
       email: user.email,
@@ -28,13 +34,7 @@ export class PrismaUserRepository implements IUserRepository {
     return this.mapToDomain(user);
   }
 
-  async findById(id: string): Promise<UserEntities | null> {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-    });
-    if (!user) return null;
-    return this.mapToDomain(user);
-  }
+  // findById and findAll are handled by PrismaBaseRepository
 
   async create(data: Partial<UserEntities>): Promise<UserEntities> {
     const user = await this.prisma.user.create({

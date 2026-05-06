@@ -15,7 +15,7 @@ export class AuthController {
     private readonly loginUseCase: ILoginUseCase,
     @Inject(IRefreshUseCase)
     private readonly refreshUseCase: IRefreshUseCase,
-  ) { }
+  ) {}
 
   @Post('register')
   async register(@Body() body: RegisterInputDto) {
