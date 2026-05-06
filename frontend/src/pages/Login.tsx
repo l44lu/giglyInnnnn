@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import axios from "axios";
+import Swal from "sweetalert2";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,30 +9,72 @@ import { Link } from "react-router";
 
 const Login = () => {
   const [formData, setFormData] = useState({ email: "", password: "" });
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  const validateForm = () => {
+    const newErrors: Record<string, string> = {};
+
+    if (!formData.email.trim()) {
+      newErrors.email = "Email is required";
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = "Email is invalid";
+    }
+
+    if (!formData.password) {
+      newErrors.password = "Password is required";
+    }
+
+    setErrors(newErrors);
+
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validateForm()) return;
+
     setIsLoading(true);
+
     try {
-      // gotta move the url to .env file make sure to do it
+      const sanitizedData = {
+        ...formData,
+        email: formData.email.trim().toLowerCase(),
+      };
+
       const response = await axios.post(
-        "http://localhost:3000/auth/login",
-        formData,
+        `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/login`,
+        sanitizedData,
       );
-      //=======================================================================================================================================
-      //not a good practice to store the jwt in the localstorage so gotta change to Access token in memory + Refresh token in HttpOnly cookie
-      //=======================================================================================================================================
+
       const data = response.data as {
         access_token: string;
         user: { firstName: string };
       };
-      localStorage.setItem("token", data.access_token);
 
-      alert("Login Successful! Welcome " + data.user.firstName);
-    } catch (error) {
+      localStorage.setItem("token", data.access_token);
+      await Swal.fire({
+        icon: "success",
+        title: "Login Successful",
+        text: "Welcome Back " + data.user.firstName,
+        timer: 2000,
+        showConfirmButton: false,
+        confirmButtonColor: "#2563eb",
+      });
+    } catch (error: unknown) {
       console.error(error);
-      alert("Login Failed. Check credentials.");
+      let message: string | string[] = "Login Failed. Check credentials.";
+
+      if (axios.isAxiosError<{ message: string | string[] }>(error)) {
+        message = error.response?.data?.message || message;
+      }
+
+      await Swal.fire({
+        icon: "error",
+        title: "Login Failed",
+        text: Array.isArray(message) ? message.join(", ") : message,
+        confirmButtonColor: "#2563eb",
+      });
     } finally {
       setIsLoading(false);
     }
@@ -103,7 +146,7 @@ const Login = () => {
             }}
             className="space-y-5"
           >
-            <div className="space-y-20">
+            <div className="space-y-1.5">
               <Label
                 htmlFor="email"
                 className="text-slate-700 text-sm font-semibold"
@@ -116,10 +159,14 @@ const Login = () => {
                 placeholder="name@example.com"
                 required
                 className="bg-white border-slate-200 focus-visible:ring-blue-500 h-11"
-                onChange={(e) =>
-                  setFormData({ ...formData, email: e.target.value })
-                }
+                onChange={(e) => {
+                  setFormData({ ...formData, email: e.target.value });
+                  if (errors.email) setErrors({ ...errors, email: "" });
+                }}
               />
+              {errors.email && (
+                <p className="text-red-500 text-xs mt-1">{errors.email}</p>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -143,10 +190,14 @@ const Login = () => {
                 placeholder="Enter your password"
                 required
                 className="bg-white border-slate-200 focus-visible:ring-blue-500 h-11"
-                onChange={(e) =>
-                  setFormData({ ...formData, password: e.target.value })
-                }
+                onChange={(e) => {
+                  setFormData({ ...formData, password: e.target.value });
+                  if (errors.password) setErrors({ ...errors, password: "" });
+                }}
               />
+              {errors.password && (
+                <p className="text-red-500 text-xs mt-1">{errors.password}</p>
+              )}
             </div>
 
             <Button
