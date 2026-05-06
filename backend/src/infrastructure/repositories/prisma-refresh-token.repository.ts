@@ -3,12 +3,18 @@ import { IRefreshTokenRepository } from '../../domain/repositories/refresh-token
 import { RefreshTokenEntity } from '../../domain/entities/refresh-token.entity';
 import { PrismaService } from '../prisma/prisma.service';
 import { RefreshToken } from '@prisma/client';
+import { PrismaBaseRepository } from './base.repository';
 
 @Injectable()
-export class PrismaRefreshTokenRepository implements IRefreshTokenRepository {
-  constructor(private prisma: PrismaService) {}
+export class PrismaRefreshTokenRepository
+  extends PrismaBaseRepository<RefreshTokenEntity, RefreshToken>
+  implements IRefreshTokenRepository
+{
+  constructor(prisma: PrismaService) {
+    super(prisma, prisma.refreshToken);
+  }
 
-  private mapToDomain(token: RefreshToken): RefreshTokenEntity {
+  protected mapToDomain(token: RefreshToken): RefreshTokenEntity {
     return new RefreshTokenEntity({
       id: token.id,
       token: token.token,

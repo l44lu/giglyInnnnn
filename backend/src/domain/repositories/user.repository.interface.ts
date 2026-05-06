@@ -1,9 +1,8 @@
 import { UserEntities } from '../entities/user.entities';
+import { IBaseRepository } from './base.repository.interface';
 
-export interface IUserRepository {
+export interface IUserRepository extends IBaseRepository<UserEntities> {
   findByEmail(email: string): Promise<UserEntities | null>;
-  findById(id: string): Promise<UserEntities | null>;
-  create(data: Partial<UserEntities>): Promise<UserEntities>;
 }
 
 export const IUserRepository = Symbol('IUserRepository');
