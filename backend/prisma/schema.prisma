@@ -328,6 +328,18 @@ model RefreshToken {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
+model Otp {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  otp          String
+  firstName    String
+  lastName     String
+  passwordHash String
+  role         Role     @default(WORKER)
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+}
+
 enum Role {
   ADMIN
   RECRUITER

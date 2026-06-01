@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import Swal from "sweetalert2";
@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Briefcase, Building2, UserCircle, Mail } from "lucide-react";
+
+const OTP_LENGTH = 6;
 
 const Signup = () => {
   const [formData, setFormData] = useState({
@@ -17,6 +19,25 @@ const Signup = () => {
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+
+  // OTP verification state
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpValues, setOtpValues] = useState<string[]>(
+    Array(OTP_LENGTH).fill(""),
+  );
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isResending, setIsResending] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // Countdown timer for resend cooldown
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = setInterval(() => {
+      setResendCooldown((prev) => prev - 1);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [resendCooldown]);
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};
@@ -55,19 +76,27 @@ const Signup = () => {
         lastName: formData.lastName.trim(),
       };
 
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/register`,
+      await axios.post(
+        `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/register/send-otp`,
         sanitizedData,
       );
 
-      const data = response.data as { id: string; firstName: string };
+      // OTP sent successfully — show the verification modal
+      setShowOtpModal(true);
+      setOtpValues(Array(OTP_LENGTH).fill(""));
+      setResendCooldown(60);
 
       await Swal.fire({
         icon: "success",
-        title: "Registration Successful!",
-        text: "Welcome to Gigly " + (data.firstName || formData.firstName),
+        title: "Verification Code Sent!",
+        text: `We've sent a 6-digit code to ${sanitizedData.email}`,
         confirmButtonColor: "#2563eb",
+        timer: 3000,
+        timerProgressBar: true,
       });
+
+      // Focus the first OTP input after the alert closes
+      setTimeout(() => inputRefs.current[0]?.focus(), 100);
     } catch (error: unknown) {
       console.error(error);
 
@@ -85,6 +114,167 @@ const Signup = () => {
       });
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // OTP input handlers
+  const handleOtpChange = (index: number, value: string) => {
+    // Only allow digits
+    if (value && !/^\d$/.test(value)) return;
+
+    const newOtpValues = [...otpValues];
+    newOtpValues[index] = value;
+    setOtpValues(newOtpValues);
+
+    // Auto-advance to next input
+    if (value && index < OTP_LENGTH - 1) {
+      inputRefs.current[index + 1]?.focus();
+    }
+
+    // Auto-submit when all digits are entered
+    if (newOtpValues.every((v) => v !== "")) {
+      void handleVerifyOtp(newOtpValues);
+    }
+  };
+
+  const handleOtpKeyDown = (
+    index: number,
+    e: React.KeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (e.key === "Backspace" && !otpValues[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus();
+    }
+  };
+
+  const handleOtpPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
+    const pasted = e.clipboardData
+      .getData("text")
+      .replace(/\D/g, "")
+      .slice(0, OTP_LENGTH);
+    if (!pasted) return;
+
+    const newOtpValues = [...otpValues];
+    for (let i = 0; i < pasted.length; i++) {
+      newOtpValues[i] = pasted[i];
+    }
+    setOtpValues(newOtpValues);
+
+    // Focus the input after the last pasted digit
+    const focusIndex = Math.min(pasted.length, OTP_LENGTH - 1);
+    inputRefs.current[focusIndex]?.focus();
+
+    if (newOtpValues.every((v) => v !== "")) {
+      void handleVerifyOtp(newOtpValues);
+    }
+  };
+
+  const handleVerifyOtp = useCallback(
+    async (customOtpValues?: string[]) => {
+      const valuesToUse = customOtpValues || otpValues;
+      const otpCode = valuesToUse.join("");
+      if (otpCode.length !== OTP_LENGTH) {
+        await Swal.fire({
+          icon: "warning",
+          title: "Incomplete Code",
+          text: "Please enter the full 6-digit verification code.",
+          confirmButtonColor: "#2563eb",
+        });
+        return;
+      }
+
+      setIsVerifying(true);
+      try {
+        const response = await axios.post(
+          `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/register/verify-otp`,
+          {
+            email: formData.email.trim().toLowerCase(),
+            otp: otpCode,
+          },
+        );
+
+        const data = response.data as { id: string; firstName: string };
+
+        setShowOtpModal(false);
+
+        await Swal.fire({
+          icon: "success",
+          title: "Registration Successful!",
+          text: "Welcome to Gigly " + (data.firstName || formData.firstName),
+          confirmButtonColor: "#2563eb",
+        });
+      } catch (error: unknown) {
+        console.error(error);
+
+        let message: string | string[] = "Verification Failed.";
+
+        if (axios.isAxiosError<{ message: string | string[] }>(error)) {
+          message = error.response?.data?.message || message;
+        }
+
+        await Swal.fire({
+          icon: "error",
+          title: "Verification Failed",
+          text: Array.isArray(message) ? message.join(", ") : message,
+          confirmButtonColor: "#2563eb",
+        });
+
+        // Clear OTP inputs on failure so user can retry
+        setOtpValues(Array(OTP_LENGTH).fill(""));
+        inputRefs.current[0]?.focus();
+      } finally {
+        setIsVerifying(false);
+      }
+    },
+    [otpValues, formData.email, formData.firstName],
+  );
+
+  const handleResendOtp = async () => {
+    if (resendCooldown > 0) return;
+
+    setIsResending(true);
+    try {
+      const sanitizedData = {
+        ...formData,
+        email: formData.email.trim().toLowerCase(),
+        firstName: formData.firstName.trim(),
+        lastName: formData.lastName.trim(),
+      };
+
+      await axios.post(
+        `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/register/send-otp`,
+        sanitizedData,
+      );
+
+      setResendCooldown(60);
+      setOtpValues(Array(OTP_LENGTH).fill(""));
+      inputRefs.current[0]?.focus();
+
+      await Swal.fire({
+        icon: "success",
+        title: "Code Resent!",
+        text: "A new verification code has been sent to your email.",
+        confirmButtonColor: "#2563eb",
+        timer: 2000,
+        timerProgressBar: true,
+      });
+    } catch (error: unknown) {
+      console.error(error);
+
+      let message: string | string[] = "Failed to resend code.";
+
+      if (axios.isAxiosError<{ message: string | string[] }>(error)) {
+        message = error.response?.data?.message || message;
+      }
+
+      await Swal.fire({
+        icon: "error",
+        title: "Resend Failed",
+        text: Array.isArray(message) ? message.join(", ") : message,
+        confirmButtonColor: "#2563eb",
+      });
+    } finally {
+      setIsResending(false);
     }
   };
 
@@ -307,7 +497,7 @@ const Signup = () => {
               className="w-full h-11 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-sm mt-4"
               disabled={isLoading}
             >
-              {isLoading ? "Creating account..." : "Create account"}
+              {isLoading ? "Sending verification code..." : "Create account"}
             </Button>
 
             <div className="relative py-4 mt-2">
@@ -344,6 +534,153 @@ const Signup = () => {
           </form>
         </div>
       </div>
+
+      {/* ─── OTP Verification Modal ─── */}
+      {showOtpModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          {/* Backdrop */}
+          <div
+            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            onClick={() => setShowOtpModal(false)}
+          />
+
+          {/* Modal Card */}
+          <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-8 animate-in fade-in zoom-in duration-300">
+            {/* Close Button */}
+            <button
+              onClick={() => setShowOtpModal(false)}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-600 transition-colors"
+              aria-label="Close verification modal"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+
+            {/* Mail Icon */}
+            <div className="flex justify-center mb-6">
+              <div className="w-16 h-16 rounded-full bg-blue-50 flex items-center justify-center">
+                <Mail className="w-8 h-8 text-blue-600" />
+              </div>
+            </div>
+
+            {/* Title */}
+            <h3 className="text-xl font-bold text-slate-900 text-center mb-2">
+              Verify your email
+            </h3>
+            <p className="text-sm text-slate-500 text-center mb-8 leading-relaxed">
+              We&apos;ve sent a 6-digit verification code to
+              <br />
+              <span className="font-semibold text-slate-700">
+                {formData.email.trim().toLowerCase()}
+              </span>
+            </p>
+
+            {/* OTP Input Boxes */}
+            <div
+              className="flex justify-center gap-3 mb-8"
+              onPaste={handleOtpPaste}
+            >
+              {otpValues.map((value, index) => (
+                <input
+                  key={index}
+                  ref={(el) => {
+                    inputRefs.current[index] = el;
+                  }}
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={1}
+                  value={value}
+                  onChange={(e) => handleOtpChange(index, e.target.value)}
+                  onKeyDown={(e) => handleOtpKeyDown(index, e)}
+                  className={`w-12 h-14 text-center text-xl font-bold rounded-xl border-2 transition-all duration-200 outline-none
+                    ${
+                      value
+                        ? "border-blue-500 bg-blue-50/30 text-blue-700"
+                        : "border-slate-200 bg-white text-slate-900"
+                    }
+                    focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20`}
+                  disabled={isVerifying}
+                  autoComplete="one-time-code"
+                />
+              ))}
+            </div>
+
+            {/* Verify Button */}
+            <Button
+              type="button"
+              onClick={() => void handleVerifyOtp()}
+              className="w-full h-11 text-sm font-medium bg-blue-600 hover:bg-blue-700 text-white shadow-sm mb-4"
+              disabled={isVerifying || otpValues.some((v) => v === "")}
+            >
+              {isVerifying ? (
+                <span className="flex items-center gap-2">
+                  <svg
+                    className="animate-spin h-4 w-4"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    />
+                  </svg>
+                  Verifying...
+                </span>
+              ) : (
+                "Verify & Create Account"
+              )}
+            </Button>
+
+            {/* Resend */}
+            <div className="text-center">
+              <p className="text-sm text-slate-500">
+                Didn&apos;t receive the code?{" "}
+                {resendCooldown > 0 ? (
+                  <span className="text-slate-400 font-medium">
+                    Resend in {resendCooldown}s
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => void handleResendOtp()}
+                    disabled={isResending}
+                    className="text-blue-600 font-semibold hover:text-blue-700 transition-colors disabled:opacity-50"
+                  >
+                    {isResending ? "Resending..." : "Resend code"}
+                  </button>
+                )}
+              </p>
+            </div>
+
+            {/* Expiry Note */}
+            <p className="text-xs text-slate-400 text-center mt-4">
+              Code expires in 10 minutes
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
