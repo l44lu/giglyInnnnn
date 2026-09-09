@@ -4,6 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- Development & Document-level Content Security Policy (enforced by browser for this document).
+         NOTE: Production edge/reverse-proxy must deliver a corresponding HTTP response header including frame-ancestors 'none',
+         which is intentionally omitted here because browsers ignore frame-ancestors when delivered via meta tags. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://images.unsplash.com https://i.pravatar.cc; font-src 'self' data:; connect-src 'self' http://localhost:3000 http://127.0.0.1:3000 ws://localhost:5173 ws://127.0.0.1:5173; object-src 'none'; base-uri 'self'; form-action 'self';"
+    />
     <title>frontend</title>
   </head>
   <body>

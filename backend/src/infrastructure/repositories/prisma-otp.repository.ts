@@ -23,6 +23,7 @@ export class PrismaOtpRepository
       lastName: otp.lastName,
       passwordHash: otp.passwordHash,
       role: otp.role,
+      attempts: otp.attempts,
       expiresAt: otp.expiresAt,
       createdAt: otp.createdAt,
     });
@@ -42,6 +43,21 @@ export class PrismaOtpRepository
     });
   }
 
+  async updateAttempts(
+    email: string,
+    attempts: number,
+  ): Promise<OtpEntity | null> {
+    try {
+      const updated = await this.prisma.otp.update({
+        where: { email },
+        data: { attempts },
+      });
+      return this.mapToDomain(updated);
+    } catch {
+      return null;
+    }
+  }
+
   async create(data: Partial<OtpEntity>): Promise<OtpEntity> {
     const otp = await this.prisma.otp.create({
       data: {
@@ -51,6 +67,7 @@ export class PrismaOtpRepository
         lastName: data.lastName!,
         passwordHash: data.passwordHash!,
         role: data.role,
+        attempts: data.attempts ?? 0,
         expiresAt: data.expiresAt!,
       },
     });

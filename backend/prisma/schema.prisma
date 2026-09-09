@@ -40,6 +40,7 @@ model User {
   paidTransactions     Transaction[]     @relation("PayerTransactions")
   workerProfile        WorkerProfile?
   refreshTokens        RefreshToken[]
+  passwordResets       PasswordReset[]
 }
 
 model Company {
@@ -320,12 +321,30 @@ model PlatformSetting {
 }
 
 model RefreshToken {
-  id        String   @id @default(uuid())
-  token     String   @unique
+  id        String    @id @default(uuid())
+  token     String    @unique
   userId    String
   expiresAt DateTime
+  createdAt DateTime  @default(now())
+  familyId  String    @default(uuid())
+  revokedAt DateTime?
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+}
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String
+  otpHash   String
+  tokenHash String?  @unique
+  attempts  Int      @default(0)
+  expiresAt DateTime
   createdAt DateTime @default(now())
+
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Otp {
@@ -336,6 +355,7 @@ model Otp {
   lastName     String
   passwordHash String
   role         Role     @default(WORKER)
+  attempts     Int      @default(0)
   expiresAt    DateTime
   createdAt    DateTime @default(now())
 }

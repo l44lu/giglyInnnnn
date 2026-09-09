@@ -98,8 +98,6 @@ const Signup = () => {
       // Focus the first OTP input after the alert closes
       setTimeout(() => inputRefs.current[0]?.focus(), 100);
     } catch (error: unknown) {
-      console.error(error);
-
       let message: string | string[] = "Registration Failed.";
 
       if (axios.isAxiosError<{ message: string | string[] }>(error)) {
@@ -204,8 +202,6 @@ const Signup = () => {
           confirmButtonColor: "#2563eb",
         });
       } catch (error: unknown) {
-        console.error(error);
-
         let message: string | string[] = "Verification Failed.";
 
         if (axios.isAxiosError<{ message: string | string[] }>(error)) {
@@ -259,8 +255,6 @@ const Signup = () => {
         timerProgressBar: true,
       });
     } catch (error: unknown) {
-      console.error(error);
-
       let message: string | string[] = "Failed to resend code.";
 
       if (axios.isAxiosError<{ message: string | string[] }>(error)) {
@@ -323,7 +317,7 @@ const Signup = () => {
           </div>
         </div>
 
-        <div className="w-full max-w-[440px] mx-auto space-y-8">
+        <div className="w-full max-w-100 mx-auto space-y-8">
           {/* Mobile Logo */}
           <div className="flex lg:hidden items-center gap-2 mb-8 justify-center">
             <Briefcase className="w-8 h-8 text-blue-600" />
@@ -447,7 +441,7 @@ const Signup = () => {
               <Label className="text-slate-700 text-sm font-semibold block">
                 How do you want to use Gigly?
               </Label>
-              <div className="grid grid-cols-2 gap-4 mt-[15px]">
+              <div className="grid grid-cols-2 gap-4 mt-3.75">
                 <button
                   type="button"
                   onClick={() => setFormData({ ...formData, role: "WORKER" })}
