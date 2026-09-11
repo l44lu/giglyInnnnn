@@ -22,6 +22,8 @@ export class PrismaUserRepository
       role: user.role,
       firstName: user.firstName,
       lastName: user.lastName,
+      isActive: user.isActive,
+      isBlocked: user.isBlocked,
       createdAt: user.createdAt,
     });
   }
@@ -44,8 +46,17 @@ export class PrismaUserRepository
         role: data.role,
         firstName: data.firstName!,
         lastName: data.lastName!,
+        isActive: data.isActive ?? true,
+        isBlocked: data.isBlocked ?? false,
       },
     });
     return this.mapToDomain(user);
+  }
+
+  async updatePassword(userId: string, passwordHash: string): Promise<void> {
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash },
+    });
   }
 }

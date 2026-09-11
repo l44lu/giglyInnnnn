@@ -1,6 +1,6 @@
 import {
   IsEmail,
-  IsEnum,
+  IsIn,
   IsNotEmpty,
   IsOptional,
   IsString,
@@ -8,6 +8,7 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Role } from '@prisma/client';
+import { ALLOWED_REGISTRATION_ROLES } from './send-otp-input.dto';
 
 export class RegisterInputDto {
   @IsEmail()
@@ -29,7 +30,9 @@ export class RegisterInputDto {
   @MaxLength(50)
   lastName!: string;
 
-  @IsEnum(Role)
+  @IsIn(ALLOWED_REGISTRATION_ROLES, {
+    message: 'Role must be either WORKER or RECRUITER',
+  })
   @IsOptional()
   role?: Role;
 }

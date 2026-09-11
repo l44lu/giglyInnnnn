@@ -5,9 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Briefcase, Mail } from "lucide-react";
-import { Link } from "react-router";
+import { Link, useNavigate } from "react-router-dom";
+import { useAuth } from "@/context";
+import api from "@/lib/api";
+import { type AuthResponse, getDashboardPathForRole } from "@/types/auth";
 
 const Login = () => {
+  const { login } = useAuth();
+  const navigate = useNavigate();
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
@@ -42,27 +47,41 @@ const Login = () => {
         email: formData.email.trim().toLowerCase(),
       };
 
-      const response = await axios.post(
-        `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/auth/login`,
+      const response = await api.post<AuthResponse>(
+        "/auth/login",
         sanitizedData,
       );
 
-      const data = response.data as {
-        access_token: string;
-        user: { firstName: string };
-      };
+      const data = response.data;
 
-      localStorage.setItem("token", data.access_token);
+      const authenticatedUser = await login(data.access_token, data.user);
+
       await Swal.fire({
         icon: "success",
         title: "Login Successful",
-        text: "Welcome Back " + data.user.firstName,
-        timer: 2000,
+        text:
+          "Welcome Back " +
+          (authenticatedUser?.firstName || data.user.firstName),
+        timer: 1500,
         showConfirmButton: false,
         confirmButtonColor: "#2563eb",
       });
+
+      const targetPath = getDashboardPathForRole(
+        authenticatedUser?.role || data.user.role,
+      );
+
+      if (targetPath) {
+        await navigate(targetPath);
+      } else {
+        await Swal.fire({
+          icon: "warning",
+          title: "Unknown Role",
+          text: "Your account role could not be recognized. Please contact support.",
+          confirmButtonColor: "#2563eb",
+        });
+      }
     } catch (error: unknown) {
-      console.error(error);
       let message: string | string[] = "Login Failed. Check credentials.";
 
       if (axios.isAxiosError<{ message: string | string[] }>(error)) {
@@ -123,7 +142,7 @@ const Login = () => {
           </div>
         </div>
 
-        <div className="w-full max-w-[440px] mx-auto space-y-8">
+        <div className="w-full max-w-100 mx-auto space-y-8">
           <div className="flex lg:hidden items-center gap-2 mb-8 justify-center">
             <Briefcase className="w-8 h-8 text-blue-600" />
             <span className="text-2xl font-bold tracking-tight text-slate-900">
@@ -177,12 +196,12 @@ const Login = () => {
                 >
                   Password
                 </Label>
-                <a
-                  href="#"
+                <Link
+                  to="/forgot-password"
                   className="text-sm font-medium text-blue-600 hover:text-blue-500"
                 >
                   Forgot password?
-                </a>
+                </Link>
               </div>
               <Input
                 id="password"
