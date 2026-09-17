@@ -28,7 +28,7 @@ import { VerifyOtpInputDto } from '../../application/dto/auth/verify-otp-input.d
 import { ForgotPasswordInputDto } from '../../application/dto/auth/forgot-password-input.dto';
 import { VerifyResetOtpInputDto } from '../../application/dto/auth/verify-reset-otp-input.dto';
 import { ResetPasswordInputDto } from '../../application/dto/auth/reset-password-input.dto';
-import { Role } from '@prisma/client';
+import { Role } from '../../domain/enums/role.enum';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
@@ -83,6 +83,29 @@ export class AuthController {
     };
   }
 
+  private getAccessCookieOptions(): CookieOptions {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    return {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 1 * 60 * 60 * 1000,
+    };
+  }
+
+  private getClearAccessCookieOptions(): CookieOptions {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    return {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'strict',
+      path: '/',
+    };
+  }
+
   @Post('register/send-otp')
   @UseGuards(OtpRateLimitGuard)
   async sendOtp(@Body() body: SendOtpInputDto) {
@@ -103,6 +126,14 @@ export class AuthController {
   ) {
     const result = await this.loginUseCase.execute(body);
 
+    if (result.access_token) {
+      res.cookie(
+        'access_token',
+        result.access_token,
+        this.getAccessCookieOptions(),
+      );
+    }
+
     if (result.refresh_token) {
       res.cookie(
         'refresh_token',
@@ -112,7 +143,6 @@ export class AuthController {
     }
 
     return {
-      access_token: result.access_token,
       user: result.user,
     };
   }
@@ -135,6 +165,14 @@ export class AuthController {
       refresh_token: refreshToken,
     });
 
+    if (result.access_token) {
+      res.cookie(
+        'access_token',
+        result.access_token,
+        this.getAccessCookieOptions(),
+      );
+    }
+
     if (result.refresh_token) {
       res.cookie(
         'refresh_token',
@@ -144,7 +182,7 @@ export class AuthController {
     }
 
     return {
-      access_token: result.access_token,
+      message: 'Tokens refreshed successfully',
     };
   }
 
@@ -171,6 +209,7 @@ export class AuthController {
     });
 
     res.clearCookie('refresh_token', this.getClearCookieOptions());
+    res.clearCookie('access_token', this.getClearAccessCookieOptions());
 
     return result;
   }

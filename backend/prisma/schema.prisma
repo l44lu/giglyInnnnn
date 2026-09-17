@@ -8,39 +8,43 @@ datasource db {
 }
 
 model User {
-  id                   String            @id @default(uuid())
-  email                String            @unique
-  passwordHash         String
-  role                 Role              @default(WORKER)
-  firstName            String
-  lastName             String
-  phone                String?
-  avatarUrl            String?
-  location             String?
-  bio                  String?
-  isVerified           Boolean           @default(false)
-  isBlocked            Boolean           @default(false)
-  isActive             Boolean           @default(true)
-  createdAt            DateTime          @default(now())
-  updatedAt            DateTime          @updatedAt
-  adminActions         AdminAction[]     @relation("AdminActions")
-  targetedAdminActions AdminAction[]     @relation("TargetAdminActions")
-  conversationsAsUser1 Conversation[]    @relation("Participant1")
-  conversationsAsUser2 Conversation[]    @relation("Participant2")
-  messages             Message[]
-  notifications        Notification[]
-  platformSettings     PlatformSetting[]
-  recruiterProfile     RecruiterProfile?
-  reportsAgainstUser   Report[]          @relation("ReportedUserReports")
-  filedReports         Report[]          @relation("ReporterReports")
-  resolvedReports      Report[]          @relation("ResolvedReports")
-  receivedReviews      Review[]          @relation("RevieweeReviews")
-  givenReviews         Review[]          @relation("ReviewerReviews")
-  receivedTransactions Transaction[]     @relation("PayeeTransactions")
-  paidTransactions     Transaction[]     @relation("PayerTransactions")
-  workerProfile        WorkerProfile?
-  refreshTokens        RefreshToken[]
-  passwordResets       PasswordReset[]
+  id                     String            @id @default(uuid())
+  email                  String            @unique
+  passwordHash           String
+  roleId                 String
+  firstName              String
+  lastName               String
+  phone                  String?
+  avatarUrl              String?
+  location               String?
+  bio                    String?
+  isVerified             Boolean           @default(false)
+  isBlocked              Boolean           @default(false)
+  isActive               Boolean           @default(true)
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+  role                   AppRole           @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permissionsGrantedByMe RolePermission[]  @relation("PermissionGranter")
+  adminActions           AdminAction[]     @relation("AdminActions")
+  targetedAdminActions   AdminAction[]     @relation("TargetAdminActions")
+  conversationsAsUser1   Conversation[]    @relation("Participant1")
+  conversationsAsUser2   Conversation[]    @relation("Participant2")
+  messages               Message[]
+  notifications          Notification[]
+  platformSettings       PlatformSetting[]
+  recruiterProfile       RecruiterProfile?
+  reportsAgainstUser     Report[]          @relation("ReportedUserReports")
+  filedReports           Report[]          @relation("ReporterReports")
+  resolvedReports        Report[]          @relation("ResolvedReports")
+  receivedReviews        Review[]          @relation("RevieweeReviews")
+  givenReviews           Review[]          @relation("ReviewerReviews")
+  receivedTransactions   Transaction[]     @relation("PayeeTransactions")
+  paidTransactions       Transaction[]     @relation("PayerTransactions")
+  workerProfile          WorkerProfile?
+  refreshTokens          RefreshToken[]
+  passwordResets         PasswordReset[]
+
+  @@index([roleId])
 }
 
 model Company {
@@ -81,7 +85,6 @@ model WorkerProfile {
   availabilityStatus  String                   @default("available")
   isOpenToWork        Boolean                  @default(true)
   totalCompletedGigs  Int                      @default(0)
-  memberSince         DateTime?                @db.Date
   createdAt           DateTime                 @default(now())
   updatedAt           DateTime                 @updatedAt
   applications        JobApplication[]
@@ -151,7 +154,6 @@ model JobPost {
   skills            JobPostSkill[]
   reports           Report[]
   reviews           Review[]
-  transactions      Transaction[]
 }
 
 model JobPostSkill {
@@ -176,11 +178,12 @@ model JobApplication {
   jobPost       JobPost       @relation(fields: [jobPostId], references: [id])
   worker        WorkerProfile @relation(fields: [workerId], references: [id])
   transactions  Transaction[]
+
+  @@unique([jobPostId, workerId])
 }
 
 model Transaction {
   id               String         @id @default(uuid())
-  jobPostId        String
   applicationId    String
   payerId          String
   payeeId          String
@@ -193,7 +196,6 @@ model Transaction {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
   application      JobApplication @relation(fields: [applicationId], references: [id])
-  jobPost          JobPost        @relation(fields: [jobPostId], references: [id])
   payee            User           @relation("PayeeTransactions", fields: [payeeId], references: [id])
   payer            User           @relation("PayerTransactions", fields: [payerId], references: [id])
 }
@@ -236,6 +238,8 @@ model Review {
   jobPost      JobPost  @relation(fields: [jobPostId], references: [id])
   reviewee     User     @relation("RevieweeReviews", fields: [revieweeId], references: [id])
   reviewer     User     @relation("ReviewerReviews", fields: [reviewerId], references: [id])
+
+  @@unique([reviewerId, revieweeId, jobPostId])
 }
 
 model Report {
@@ -341,7 +345,6 @@ model PasswordReset {
   attempts  Int      @default(0)
   expiresAt DateTime
   createdAt DateTime @default(now())
-
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
@@ -354,14 +357,62 @@ model Otp {
   firstName    String
   lastName     String
   passwordHash String
-  role         Role     @default(WORKER)
+  roleId       String
   attempts     Int      @default(0)
   expiresAt    DateTime
   createdAt    DateTime @default(now())
+  role         AppRole  @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@index([roleId])
 }
 
-enum Role {
-  ADMIN
-  RECRUITER
-  WORKER
+model AppRole {
+  id                         String           @id @default(uuid())
+  code                       String           @unique
+  name                       String
+  description                String?
+  isSystem                   Boolean          @default(false)
+  isActive                   Boolean          @default(true)
+  isAssignableOnRegistration Boolean          @default(false)
+  createdAt                  DateTime         @default(now())
+  updatedAt                  DateTime         @updatedAt
+
+  users                      User[]
+  otps                       Otp[]
+  rolePermissions            RolePermission[]
+
+  @@index([code])
+  @@index([isActive])
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(uuid())
+  code            String           @unique
+  name            String
+  module          String
+  description     String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  rolePermissions RolePermission[]
+
+  @@index([code])
+  @@index([module])
+}
+
+model RolePermission {
+  id           String     @id @default(uuid())
+  roleId       String
+  permissionId String
+  grantedAt    DateTime   @default(now())
+  grantedBy    String?
+
+  role         AppRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+  granter      User?      @relation("PermissionGranter", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
 }

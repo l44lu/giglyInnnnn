@@ -4,7 +4,7 @@ import request from 'supertest';
 import { AppModule } from './../src/app.module';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Role } from '@prisma/client';
+import { Role } from '../src/domain/enums/role.enum';
 import { PrismaService } from '../src/infrastructure/prisma/prisma.service';
 import { IRefreshTokenRepository } from '../src/domain/repositories/refresh-token.repository.interface';
 import { Server } from 'http';
@@ -25,6 +25,19 @@ function getRefreshTokenFromCookie(res: request.Response): string {
   if (!refreshCookie)
     throw new Error('No refresh_token cookie found in set-cookie headers');
   return refreshCookie.split(';')[0].split('=')[1];
+}
+
+function getAccessTokenFromCookie(res: request.Response): string {
+  const setCookie = res.headers['set-cookie'] as unknown;
+  const cookies: string[] = Array.isArray(setCookie)
+    ? (setCookie as string[])
+    : typeof setCookie === 'string'
+      ? [setCookie]
+      : [];
+  const accessCookie = cookies.find((c) => c.startsWith('access_token='));
+  if (!accessCookie)
+    throw new Error('No access_token cookie found in set-cookie headers');
+  return accessCookie.split(';')[0].split('=')[1];
 }
 
 describe('RBAC & Auth End-to-End Verification (e2e)', () => {
@@ -88,7 +101,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
   });
 
   describe('PHASE 4: JWT Authentication & Hydration (/auth/me)', () => {
-    it('should return 401 when Authorization header is missing', async () => {
+    it('should return 401 when access_token cookie is missing', async () => {
       const res = await request(httpServer).get('/auth/me');
       expect(res.status).toBe(401);
     });
@@ -96,7 +109,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
     it('should return 401 when token is malformed', async () => {
       const res = await request(httpServer)
         .get('/auth/me')
-        .set('Authorization', 'Bearer not.a.valid.jwt.token');
+        .set('Cookie', ['access_token=not.a.valid.jwt.token']);
 
       expect(res.status).toBe(401);
     });
@@ -109,25 +122,30 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       const res = await request(httpServer)
         .get('/auth/me')
-        .set('Authorization', `Bearer ${fakeSecretToken}`);
+        .set('Cookie', [`access_token=${fakeSecretToken}`]);
 
       expect(res.status).toBe(401);
     });
 
-    it('should successfully authenticate real ADMIN user from database via JWT', async () => {
+    it('should successfully authenticate real ADMIN user from database via access_token cookie', async () => {
       const adminUser = await prismaService.user.findFirst({
-        where: { role: Role.ADMIN },
+        where: { role: { code: Role.ADMIN } },
+        include: { role: true },
       });
 
       if (adminUser) {
         const validAdminToken = jwtService.sign(
-          { sub: adminUser.id, email: adminUser.email, role: adminUser.role },
+          {
+            sub: adminUser.id,
+            email: adminUser.email,
+            role: adminUser.role.code,
+          },
           { secret: configService.get<string>('JWT_SECRET') },
         );
 
         const res = await request(httpServer)
           .get('/auth/me')
-          .set('Authorization', `Bearer ${validAdminToken}`);
+          .set('Cookie', [`access_token=${validAdminToken}`]);
 
         expect(res.status).toBe(200);
         expect(res.body.id).toBe(adminUser.id);
@@ -138,9 +156,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       }
     });
 
-    it('should successfully authenticate real WORKER user from database via JWT', async () => {
+    it('should successfully authenticate real WORKER user from database via access_token cookie', async () => {
       const workerUser = await prismaService.user.findFirst({
-        where: { role: Role.WORKER },
+        where: { role: { code: Role.WORKER } },
+        include: { role: true },
       });
 
       if (workerUser) {
@@ -148,14 +167,14 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
           {
             sub: workerUser.id,
             email: workerUser.email,
-            role: workerUser.role,
+            role: workerUser.role.code,
           },
           { secret: configService.get<string>('JWT_SECRET') },
         );
 
         const res = await request(httpServer)
           .get('/auth/me')
-          .set('Authorization', `Bearer ${validWorkerToken}`);
+          .set('Cookie', [`access_token=${validWorkerToken}`]);
 
         expect(res.status).toBe(200);
         expect(res.body.id).toBe(workerUser.id);
@@ -164,9 +183,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       }
     });
 
-    it('should successfully authenticate real RECRUITER user from database via JWT', async () => {
+    it('should successfully authenticate real RECRUITER user from database via access_token cookie', async () => {
       const recruiterUser = await prismaService.user.findFirst({
-        where: { role: Role.RECRUITER },
+        where: { role: { code: Role.RECRUITER } },
+        include: { role: true },
       });
 
       if (recruiterUser) {
@@ -174,14 +194,14 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
           {
             sub: recruiterUser.id,
             email: recruiterUser.email,
-            role: recruiterUser.role,
+            role: recruiterUser.role.code,
           },
           { secret: configService.get<string>('JWT_SECRET') },
         );
 
         const res = await request(httpServer)
           .get('/auth/me')
-          .set('Authorization', `Bearer ${validRecruiterToken}`);
+          .set('Cookie', [`access_token=${validRecruiterToken}`]);
 
         expect(res.status).toBe(200);
         expect(res.body.id).toBe(recruiterUser.id);
@@ -194,7 +214,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
   describe('PHASE 10: Cryptographic Tampering Verification', () => {
     it('should reject when a WORKER modifies JWT payload to ADMIN without signature', async () => {
       const workerUser = await prismaService.user.findFirst({
-        where: { role: Role.WORKER },
+        where: { role: { code: Role.WORKER } },
       });
 
       if (workerUser) {
@@ -218,7 +238,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
         const res = await request(httpServer)
           .get('/auth/me')
-          .set('Authorization', `Bearer ${tamperedToken}`);
+          .set('Cookie', [`access_token=${tamperedToken}`]);
 
         expect(res.status).toBe(401);
       }
@@ -242,7 +262,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         create: {
           email: loginEmail,
           passwordHash,
-          role: Role.WORKER,
+          role: { connect: { code: Role.WORKER } },
           firstName: 'E2E',
           lastName: 'LoginTester',
         },
@@ -255,7 +275,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         create: {
           email: refreshEmail,
           passwordHash,
-          role: Role.WORKER,
+          role: { connect: { code: Role.WORKER } },
           firstName: 'E2E',
           lastName: 'RefreshTester',
         },
@@ -268,7 +288,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         create: {
           email: isolationEmail,
           passwordHash,
-          role: Role.WORKER,
+          role: { connect: { code: Role.WORKER } },
           firstName: 'E2E',
           lastName: 'IsolationTester',
         },
@@ -294,7 +314,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       });
 
       expect(loginRes.status).toBe(201);
-      expect(loginRes.body.access_token).toBeDefined();
+      expect(loginRes.body.access_token).toBeUndefined();
       expect(loginRes.body.refresh_token).toBeUndefined();
 
       const setCookie = loginRes.headers['set-cookie'] as unknown;
@@ -374,7 +394,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .set('Cookie', [`refresh_token=${rawRefreshTokenA}`]);
 
       expect(refreshRes1.status).toBe(201);
-      expect(refreshRes1.body.access_token).toBeDefined();
+      expect(refreshRes1.body.access_token).toBeUndefined();
       expect(refreshRes1.body.refresh_token).toBeUndefined();
 
       const rawRefreshTokenB = getRefreshTokenFromCookie(refreshRes1);
@@ -400,9 +420,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       expect(dbTokenB!.familyId).toBe(familyId); // Same family!
 
       // Verify newly issued access token works on /auth/me
+      const rawAccessTokenB = getAccessTokenFromCookie(refreshRes1);
       const meRes = await request(httpServer)
         .get('/auth/me')
-        .set('Authorization', `Bearer ${refreshRes1.body.access_token}`);
+        .set('Cookie', [`access_token=${rawAccessTokenB}`]);
       expect(meRes.status).toBe(200);
       expect(meRes.body.id).toBe(refreshUserId);
 
@@ -412,7 +433,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .set('Cookie', [`refresh_token=${rawRefreshTokenB}`]);
 
       expect(refreshRes2.status).toBe(201);
-      expect(refreshRes2.body.access_token).toBeDefined();
+      expect(refreshRes2.body.access_token).toBeUndefined();
       expect(refreshRes2.body.refresh_token).toBeUndefined();
       const rawRefreshTokenC = getRefreshTokenFromCookie(refreshRes2);
       expect(rawRefreshTokenC).not.toBe(rawRefreshTokenB);
@@ -439,7 +460,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .set('Cookie', [`refresh_token=${rawRefreshTokenC}`]);
 
       expect(refreshRes3.status).toBe(201);
-      expect(refreshRes3.body.access_token).toBeDefined();
+      expect(refreshRes3.body.access_token).toBeUndefined();
       expect(refreshRes3.body.refresh_token).toBeUndefined();
       const rawRefreshTokenD = getRefreshTokenFromCookie(refreshRes3);
       expect(rawRefreshTokenD).not.toBe(rawRefreshTokenC);
@@ -628,7 +649,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .set('Cookie', [`refresh_token=${rawUser1_B}`]);
 
       expect(user1RefreshSuccess.status).toBe(201);
-      expect(user1RefreshSuccess.body.access_token).toBeDefined();
+      expect(user1RefreshSuccess.body.access_token).toBeUndefined();
       expect(user1RefreshSuccess.body.refresh_token).toBeUndefined();
     });
 
@@ -740,7 +761,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .set('Cookie', [`refresh_token=${rawRefreshTokenA}`]);
 
       expect(refreshRes.status).toBe(201);
-      expect(refreshRes.body.access_token).toBeDefined();
+      expect(refreshRes.body.access_token).toBeUndefined();
       expect(refreshRes.body.refresh_token).toBeUndefined();
 
       const rawRefreshTokenB = getRefreshTokenFromCookie(refreshRes);
@@ -836,7 +857,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         create: {
           email: logoutEmail,
           passwordHash,
-          role: Role.WORKER,
+          role: { connect: { code: Role.WORKER } },
           firstName: 'E2E',
           lastName: 'LogoutTester',
         },
@@ -849,7 +870,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         create: {
           email: otherUserEmail,
           passwordHash,
-          role: Role.WORKER,
+          role: { connect: { code: Role.WORKER } },
           firstName: 'E2E',
           lastName: 'OtherLogoutTester',
         },
@@ -874,7 +895,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       });
 
       expect(loginRes.status).toBe(201);
-      const accessToken = loginRes.body.access_token as string;
+      const accessToken = getAccessTokenFromCookie(loginRes);
       const rawRefreshToken = getRefreshTokenFromCookie(loginRes);
       const tokenHash = crypto
         .createHash('sha256')
@@ -888,11 +909,13 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       const familyId = initialToken!.familyId;
       expect(initialToken!.revokedAt).toBeNull();
 
-      // 2. Authenticated logout request with cookie
+      // 2. Authenticated logout request with cookies
       const logoutRes = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Cookie', [`refresh_token=${rawRefreshToken}`]);
+        .set('Cookie', [
+          `access_token=${accessToken}`,
+          `refresh_token=${rawRefreshToken}`,
+        ]);
 
       expect(logoutRes.status).toBe(200);
       expect(logoutRes.body).toEqual({ message: 'Logged out successfully' });
@@ -933,13 +956,14 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         email: logoutEmail,
         password: e2ePassword,
       });
-      const accessToken = loginRes.body.access_token as string;
+      const accessToken = getAccessTokenFromCookie(loginRes);
       const rawA = getRefreshTokenFromCookie(loginRes);
 
       const rotateRes = await request(httpServer)
         .post('/auth/refresh')
         .set('Cookie', [`refresh_token=${rawA}`]);
       expect(rotateRes.status).toBe(201);
+      expect(rotateRes.body.access_token).toBeUndefined();
       const rawB = getRefreshTokenFromCookie(rotateRes);
 
       const hashA = crypto.createHash('sha256').update(rawA).digest('hex');
@@ -949,11 +973,13 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       });
       const familyId = tokenRecA!.familyId;
 
-      // 2. Log out using active Token B via cookie
+      // 2. Log out using active Token B via cookies
       const logoutRes = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Cookie', [`refresh_token=${rawB}`]);
+        .set('Cookie', [
+          `access_token=${accessToken}`,
+          `refresh_token=${rawB}`,
+        ]);
       expect(logoutRes.status).toBe(200);
 
       // 3. Verify ALL family members (Token A and Token B) are now revoked in DB
@@ -987,7 +1013,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         email: logoutEmail,
         password: e2ePassword,
       });
-      const laptopAccessToken = laptopLogin.body.access_token as string;
+      const laptopAccessToken = getAccessTokenFromCookie(laptopLogin);
       const laptopRefreshToken = getRefreshTokenFromCookie(laptopLogin);
       const laptopHash = crypto
         .createHash('sha256')
@@ -1016,11 +1042,13 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       // Verify distinct families for the same user
       expect(laptopFamilyId).not.toBe(phoneFamilyId);
 
-      // 3. Log out Laptop session via cookie
+      // 3. Log out Laptop session via cookies
       const logoutLaptopRes = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${laptopAccessToken}`)
-        .set('Cookie', [`refresh_token=${laptopRefreshToken}`]);
+        .set('Cookie', [
+          `access_token=${laptopAccessToken}`,
+          `refresh_token=${laptopRefreshToken}`,
+        ]);
       expect(logoutLaptopRes.status).toBe(200);
 
       // 4. In PostgreSQL: Laptop family is revoked, Phone family is ACTIVE
@@ -1039,7 +1067,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .post('/auth/refresh')
         .set('Cookie', [`refresh_token=${phoneRefreshToken}`]);
       expect(phoneRefresh.status).toBe(201);
-      expect(phoneRefresh.body.access_token).toBeDefined();
+      expect(phoneRefresh.body.access_token).toBeUndefined();
       expect(phoneRefresh.body.refresh_token).toBeUndefined();
     });
 
@@ -1049,7 +1077,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         email: logoutEmail,
         password: e2ePassword,
       });
-      const user1AccessToken = user1Login.body.access_token as string;
+      const user1AccessToken = getAccessTokenFromCookie(user1Login);
       const user1RefreshToken = getRefreshTokenFromCookie(user1Login);
 
       // User 2 (otherUser) login
@@ -1063,11 +1091,13 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .update(user2RefreshToken)
         .digest('hex');
 
-      // User 1 logs out via cookie
+      // User 1 logs out via cookies
       const logoutUser1 = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${user1AccessToken}`)
-        .set('Cookie', [`refresh_token=${user1RefreshToken}`]);
+        .set('Cookie', [
+          `access_token=${user1AccessToken}`,
+          `refresh_token=${user1RefreshToken}`,
+        ]);
       expect(logoutUser1.status).toBe(200);
 
       // User 2's token remains completely active in DB
@@ -1089,7 +1119,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         email: logoutEmail,
         password: e2ePassword,
       });
-      const user1AccessToken = user1Login.body.access_token as string;
+      const user1AccessToken = getAccessTokenFromCookie(user1Login);
 
       // User 2 logs in
       const user2Login = await request(httpServer).post('/auth/login').send({
@@ -1105,8 +1135,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       // TEST 8: User 1 attempts to log out with User 2's refresh token in cookie
       const crossUserLogout = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${user1AccessToken}`)
-        .set('Cookie', [`refresh_token=${user2RefreshToken}`]);
+        .set('Cookie', [
+          `access_token=${user1AccessToken}`,
+          `refresh_token=${user2RefreshToken}`,
+        ]);
       expect(crossUserLogout.status).toBe(401);
 
       // Verify User 2's token was NOT revoked!
@@ -1126,8 +1158,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       );
       const unknownLogout = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${user1AccessToken}`)
-        .set('Cookie', [`refresh_token=${unknownJwt}`]);
+        .set('Cookie', [
+          `access_token=${user1AccessToken}`,
+          `refresh_token=${unknownJwt}`,
+        ]);
       expect(unknownLogout.status).toBe(401);
     });
 
@@ -1136,10 +1170,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         email: logoutEmail,
         password: e2ePassword,
       });
-      const accessToken = loginRes.body.access_token as string;
+      const accessToken = getAccessTokenFromCookie(loginRes);
       const refreshToken = getRefreshTokenFromCookie(loginRes);
 
-      // 1. Missing Authorization header -> 401
+      // 1. Missing access_token cookie -> 401
       const noAuthHeader = await request(httpServer)
         .post('/auth/logout')
         .set('Cookie', [`refresh_token=${refreshToken}`]);
@@ -1148,28 +1182,34 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       // 2. Missing refresh_token cookie -> 401
       const noRefreshToken = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`);
+        .set('Cookie', [`access_token=${accessToken}`]);
       expect(noRefreshToken.status).toBe(401);
 
       // 3. Tampered refresh token cookie -> 401
       const tamperedRes = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Cookie', ['refresh_token=tampered.refresh.token.123']);
+        .set('Cookie', [
+          `access_token=${accessToken}`,
+          'refresh_token=tampered.refresh.token.123',
+        ]);
       expect(tamperedRes.status).toBe(401);
 
       // 4. Initial valid logout -> 200
       const validLogout = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Cookie', [`refresh_token=${refreshToken}`]);
+        .set('Cookie', [
+          `access_token=${accessToken}`,
+          `refresh_token=${refreshToken}`,
+        ]);
       expect(validLogout.status).toBe(200);
 
       // 5. Subsequent logout with already-revoked token -> succeeds without resurrecting tokens
       const repeatedLogout = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Cookie', [`refresh_token=${refreshToken}`]);
+        .set('Cookie', [
+          `access_token=${accessToken}`,
+          `refresh_token=${refreshToken}`,
+        ]);
       expect(repeatedLogout.status).toBe(200);
 
       // Refresh token is still revoked, not resurrected
@@ -1197,7 +1237,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         create: {
           email: cleanBreakEmail,
           passwordHash,
-          role: Role.WORKER,
+          role: { connect: { code: Role.WORKER } },
           firstName: 'E2E',
           lastName: 'CleanBreakTester',
         },
@@ -1238,11 +1278,11 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         email: cleanBreakEmail,
         password: e2ePassword,
       });
-      const accessToken = loginRes.body.access_token as string;
+      const accessToken = getAccessTokenFromCookie(loginRes);
 
       const res = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`);
+        .set('Cookie', [`access_token=${accessToken}`]);
 
       expect(res.status).toBe(401);
     });
@@ -1252,12 +1292,12 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         email: cleanBreakEmail,
         password: e2ePassword,
       });
-      const accessToken = loginRes.body.access_token as string;
+      const accessToken = getAccessTokenFromCookie(loginRes);
       const rawToken = getRefreshTokenFromCookie(loginRes);
 
       const res = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
+        .set('Cookie', [`access_token=${accessToken}`])
         .send({ refresh_token: rawToken });
 
       expect(res.status).toBe(401);
@@ -1271,8 +1311,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       });
       expect(loginRes.status).toBe(201);
       expect(loginRes.body.refresh_token).toBeUndefined();
+      expect(loginRes.body.access_token).toBeUndefined();
       expect(JSON.stringify(loginRes.body)).not.toContain('refresh_token');
-      const accessToken = loginRes.body.access_token as string;
+      const accessToken = getAccessTokenFromCookie(loginRes);
       const rawToken = getRefreshTokenFromCookie(loginRes);
 
       // 2. Refresh
@@ -1281,16 +1322,20 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .set('Cookie', [`refresh_token=${rawToken}`]);
       expect(refreshRes.status).toBe(201);
       expect(refreshRes.body.refresh_token).toBeUndefined();
+      expect(refreshRes.body.access_token).toBeUndefined();
       expect(JSON.stringify(refreshRes.body)).not.toContain('refresh_token');
       const newRawToken = getRefreshTokenFromCookie(refreshRes);
 
       // 3. Logout
       const logoutRes = await request(httpServer)
         .post('/auth/logout')
-        .set('Authorization', `Bearer ${accessToken}`)
-        .set('Cookie', [`refresh_token=${newRawToken}`]);
+        .set('Cookie', [
+          `access_token=${accessToken}`,
+          `refresh_token=${newRawToken}`,
+        ]);
       expect(logoutRes.status).toBe(200);
       expect(logoutRes.body.refresh_token).toBeUndefined();
+      expect(logoutRes.body.access_token).toBeUndefined();
       expect(JSON.stringify(logoutRes.body)).not.toContain('refresh_token');
     });
   });
@@ -1340,7 +1385,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         create: {
           email: phase16Email,
           passwordHash,
-          role: Role.WORKER,
+          role: { connect: { code: Role.WORKER } },
           firstName: 'E2E',
           lastName: 'RateLimitTester',
         },
@@ -1467,9 +1512,12 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         });
 
       expect(res.status).toBe(201);
-      expect(res.body.access_token).toBeDefined();
-      expect(typeof res.body.access_token).toBe('string');
+      expect(res.body.access_token).toBeUndefined();
       expect(res.body.refresh_token).toBeUndefined();
+
+      const rawAccessToken = getAccessTokenFromCookie(res);
+      expect(rawAccessToken).toBeDefined();
+      expect(rawAccessToken.length).toBeGreaterThan(0);
 
       const rawRefreshToken = getRefreshTokenFromCookie(res);
       expect(rawRefreshToken).toBeDefined();
@@ -1578,12 +1626,66 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
   });
 
   describe('PHASE 17: Step 9.6 RBAC & JWT Hardening Verification', () => {
+    const p17AdminEmail = 'p17_admin_hardening@gigly.com';
+    const p17WorkerEmail = 'p17_worker_hardening@gigly.com';
+    const p17RecruiterEmail = 'p17_recruiter_hardening@gigly.com';
+    let p17UserIds: string[] = [];
+
+    beforeAll(async () => {
+      const passwordHash = await bcrypt.hash('SecurePassword123!', 10);
+      const admin = await prismaService.user.upsert({
+        where: { email: p17AdminEmail },
+        update: { passwordHash },
+        create: {
+          email: p17AdminEmail,
+          passwordHash,
+          role: { connect: { code: Role.ADMIN } },
+          firstName: 'P17',
+          lastName: 'AdminTester',
+        },
+      });
+      const worker = await prismaService.user.upsert({
+        where: { email: p17WorkerEmail },
+        update: { passwordHash },
+        create: {
+          email: p17WorkerEmail,
+          passwordHash,
+          role: { connect: { code: Role.WORKER } },
+          firstName: 'P17',
+          lastName: 'WorkerTester',
+        },
+      });
+      const recruiter = await prismaService.user.upsert({
+        where: { email: p17RecruiterEmail },
+        update: { passwordHash },
+        create: {
+          email: p17RecruiterEmail,
+          passwordHash,
+          role: { connect: { code: Role.RECRUITER } },
+          firstName: 'P17',
+          lastName: 'RecruiterTester',
+        },
+      });
+      p17UserIds = [admin.id, worker.id, recruiter.id];
+    });
+
+    afterAll(async () => {
+      await prismaService.refreshToken.deleteMany({
+        where: { userId: { in: p17UserIds } },
+      });
+      await prismaService.user.deleteMany({
+        where: { id: { in: p17UserIds } },
+      });
+    });
+
     it('JWT HARDENING (TEST 1): valid token signed with configured secret, HS256, issuer, and audience authenticates successfully', async () => {
-      const user = await prismaService.user.findFirst();
+      const user = await prismaService.user.findFirst({
+        include: { role: true },
+      });
       expect(user).toBeDefined();
 
       const validToken = jwtService.sign(
-        { sub: user!.id, email: user!.email, role: user!.role },
+        { sub: user!.id, email: user!.email, role: user!.role.code },
         {
           secret: configService.get<string>('JWT_SECRET'),
           algorithm: 'HS256',
@@ -1594,7 +1696,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       const res = await request(httpServer)
         .get('/auth/me')
-        .set('Authorization', `Bearer ${validToken}`);
+        .set('Cookie', [`access_token=${validToken}`]);
 
       expect(res.status).toBe(200);
       expect(res.body.id).toBe(user!.id);
@@ -1602,11 +1704,13 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
     });
 
     it('JWT HARDENING (TEST 2): token signed with mismatched issuer is rejected with 401', async () => {
-      const user = await prismaService.user.findFirst();
+      const user = await prismaService.user.findFirst({
+        include: { role: true },
+      });
       expect(user).toBeDefined();
 
       const invalidIssuerToken = jwtService.sign(
-        { sub: user!.id, email: user!.email, role: user!.role },
+        { sub: user!.id, email: user!.email, role: user!.role.code },
         {
           secret: configService.get<string>('JWT_SECRET'),
           issuer: 'rogue-issuer',
@@ -1616,18 +1720,20 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       const res = await request(httpServer)
         .get('/auth/me')
-        .set('Authorization', `Bearer ${invalidIssuerToken}`);
+        .set('Cookie', [`access_token=${invalidIssuerToken}`]);
 
       expect(res.status).toBe(401);
       expect(res.body.message).toBe('Invalid or expired token');
     });
 
     it('JWT HARDENING (TEST 3): token signed with mismatched audience is rejected with 401', async () => {
-      const user = await prismaService.user.findFirst();
+      const user = await prismaService.user.findFirst({
+        include: { role: true },
+      });
       expect(user).toBeDefined();
 
       const invalidAudienceToken = jwtService.sign(
-        { sub: user!.id, email: user!.email, role: user!.role },
+        { sub: user!.id, email: user!.email, role: user!.role.code },
         {
           secret: configService.get<string>('JWT_SECRET'),
           issuer: configService.get<string>('JWT_ISSUER') ?? 'gigly-auth',
@@ -1637,14 +1743,16 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       const res = await request(httpServer)
         .get('/auth/me')
-        .set('Authorization', `Bearer ${invalidAudienceToken}`);
+        .set('Cookie', [`access_token=${invalidAudienceToken}`]);
 
       expect(res.status).toBe(401);
       expect(res.body.message).toBe('Invalid or expired token');
     });
 
     it('JWT HARDENING (TEST 4): token with unsupported algorithm "none" is rejected with 401', async () => {
-      const user = await prismaService.user.findFirst();
+      const user = await prismaService.user.findFirst({
+        include: { role: true },
+      });
       expect(user).toBeDefined();
 
       const header = Buffer.from(
@@ -1654,7 +1762,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         JSON.stringify({
           sub: user!.id,
           email: user!.email,
-          role: user!.role,
+          role: user!.role.code,
           iss: configService.get<string>('JWT_ISSUER') ?? 'gigly-auth',
           aud: configService.get<string>('JWT_AUDIENCE') ?? 'gigly-app',
         }),
@@ -1663,7 +1771,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       const res = await request(httpServer)
         .get('/auth/me')
-        .set('Authorization', `Bearer ${noneAlgToken}`);
+        .set('Cookie', [`access_token=${noneAlgToken}`]);
 
       expect(res.status).toBe(401);
       expect(res.body.message).toBe('Invalid or expired token');
@@ -1673,21 +1781,242 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       const roles = [Role.ADMIN, Role.WORKER, Role.RECRUITER];
 
       for (const role of roles) {
-        const user = await prismaService.user.findFirst({ where: { role } });
+        const user = await prismaService.user.findFirst({
+          where: { role: { code: role } },
+          include: { role: true },
+        });
         if (user) {
           const token = jwtService.sign(
-            { sub: user.id, email: user.email, role: user.role },
+            { sub: user.id, email: user.email, role: user.role.code },
             { secret: configService.get<string>('JWT_SECRET') },
           );
 
           const res = await request(httpServer)
             .get('/auth/me')
-            .set('Authorization', `Bearer ${token}`);
+            .set('Cookie', [`access_token=${token}`]);
 
           expect(res.status).toBe(200);
           expect(res.body.role).toBe(role);
         }
       }
+    });
+  });
+
+  describe('PHASE 18: Step 4 Strict Cookie Authentication & Compatibility Fallback Removal', () => {
+    const step2Email = 'e2e_step2_cookie@gigly.com';
+    const step2Password = 'CookiePassword123!';
+    let step2UserId: string;
+
+    beforeAll(async () => {
+      const passwordHash = await bcrypt.hash(step2Password, 10);
+      const user = await prismaService.user.upsert({
+        where: { email: step2Email },
+        update: { passwordHash },
+        create: {
+          email: step2Email,
+          passwordHash,
+          role: { connect: { code: Role.WORKER } },
+          firstName: 'Step2',
+          lastName: 'CookieTester',
+        },
+      });
+      step2UserId = user.id;
+    });
+
+    afterAll(async () => {
+      await prismaService.refreshToken.deleteMany({
+        where: { userId: step2UserId },
+      });
+      await prismaService.user.deleteMany({
+        where: { id: step2UserId },
+      });
+    });
+
+    it('LOGIN: sets access_token HttpOnly cookie (Path=/, Max-Age=3600, SameSite=Strict) and refresh_token (Path=/auth), with NO access_token in body', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: step2Email,
+        password: step2Password,
+      });
+
+      expect(loginRes.status).toBe(201);
+      expect(loginRes.body.access_token).toBeUndefined();
+      expect(loginRes.body.user).toBeDefined();
+      expect(loginRes.body.user.email).toBe(step2Email);
+
+      const setCookie = loginRes.headers['set-cookie'] as unknown;
+      const cookies: string[] = Array.isArray(setCookie)
+        ? (setCookie as string[])
+        : typeof setCookie === 'string'
+          ? [setCookie]
+          : [];
+
+      const accessCookie = cookies.find((c) => c.startsWith('access_token='));
+      expect(accessCookie).toBeDefined();
+      expect(accessCookie).toContain('HttpOnly');
+      expect(accessCookie).toContain('Path=/');
+      expect(accessCookie).toContain('SameSite=Strict');
+      expect(accessCookie).toContain('Max-Age=3600');
+
+      const refreshCookie = cookies.find((c) => c.startsWith('refresh_token='));
+      expect(refreshCookie).toBeDefined();
+      expect(refreshCookie).toContain('HttpOnly');
+      expect(refreshCookie).toContain('Path=/auth');
+      expect(refreshCookie).toContain('SameSite=Strict');
+      expect(refreshCookie).toContain('Max-Age=604800');
+    });
+
+    it('COOKIE AUTHENTICATION: GET /auth/me succeeds with Cookie: access_token=... without Authorization header', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: step2Email,
+        password: step2Password,
+      });
+
+      const rawAccessToken = getAccessTokenFromCookie(loginRes);
+
+      const meRes = await request(httpServer)
+        .get('/auth/me')
+        .set('Cookie', [`access_token=${rawAccessToken}`]);
+
+      expect(meRes.status).toBe(200);
+      expect(meRes.body.email).toBe(step2Email);
+      expect(meRes.body.role).toBe(Role.WORKER);
+    });
+
+    it('BEARER FALLBACK REMOVAL: GET /auth/me rejects Authorization: Bearer <token> with 401 when access_token cookie is absent', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: step2Email,
+        password: step2Password,
+      });
+
+      const rawAccessToken = getAccessTokenFromCookie(loginRes);
+
+      const meRes = await request(httpServer)
+        .get('/auth/me')
+        .set('Authorization', `Bearer ${rawAccessToken}`);
+
+      expect(meRes.status).toBe(401);
+      expect(meRes.body.message).toBe('Authentication token is missing');
+    });
+
+    it('COOKIE PREFERENCE: GET /auth/me strictly authenticates via access_token cookie even if an invalid Authorization header is sent', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: step2Email,
+        password: step2Password,
+      });
+
+      const rawAccessToken = getAccessTokenFromCookie(loginRes);
+
+      // Pass an invalid Bearer token but valid cookie
+      const meRes = await request(httpServer)
+        .get('/auth/me')
+        .set('Cookie', [`access_token=${rawAccessToken}`])
+        .set('Authorization', 'Bearer invalid.bearer.token');
+
+      expect(meRes.status).toBe(200);
+      expect(meRes.body.email).toBe(step2Email);
+    });
+
+    it('UNAUTHENTICATED: GET /auth/me returns 401 when Cookie is missing', async () => {
+      const meRes = await request(httpServer).get('/auth/me');
+      expect(meRes.status).toBe(401);
+      expect(meRes.body.message).toBe('Authentication token is missing');
+    });
+
+    it('SECURITY: GET /auth/me returns 401 when access_token cookie is tampered or invalid', async () => {
+      const meRes = await request(httpServer)
+        .get('/auth/me')
+        .set('Cookie', ['access_token=tampered.invalid.jwt.token']);
+
+      expect(meRes.status).toBe(401);
+      expect(meRes.body.message).toBe('Invalid or expired token');
+    });
+
+    it('REFRESH: POST /auth/refresh sets new access_token cookie, rotates refresh_token cookie, and returns NO access_token in body', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: step2Email,
+        password: step2Password,
+      });
+
+      const oldRefreshToken = getRefreshTokenFromCookie(loginRes);
+
+      const refreshRes = await request(httpServer)
+        .post('/auth/refresh')
+        .set('Cookie', [`refresh_token=${oldRefreshToken}`]);
+
+      expect(refreshRes.status).toBe(201);
+      expect(refreshRes.body.access_token).toBeUndefined();
+      expect(refreshRes.body.message).toBe('Tokens refreshed successfully');
+
+      const setCookie = refreshRes.headers['set-cookie'] as unknown;
+      const cookies: string[] = Array.isArray(setCookie)
+        ? (setCookie as string[])
+        : typeof setCookie === 'string'
+          ? [setCookie]
+          : [];
+
+      const newAccessCookie = cookies.find((c) =>
+        c.startsWith('access_token='),
+      );
+      expect(newAccessCookie).toBeDefined();
+      expect(newAccessCookie).toContain('HttpOnly');
+      expect(newAccessCookie).toContain('Path=/');
+      expect(newAccessCookie).toContain('SameSite=Strict');
+      expect(newAccessCookie).toContain('Max-Age=3600');
+
+      const newRefreshCookie = cookies.find((c) =>
+        c.startsWith('refresh_token='),
+      );
+      expect(newRefreshCookie).toBeDefined();
+      expect(newRefreshCookie).toContain('HttpOnly');
+      expect(newRefreshCookie).toContain('Path=/auth');
+
+      // The new access token cookie can authenticate /auth/me
+      const newRawAccessToken = getAccessTokenFromCookie(refreshRes);
+      const meRes = await request(httpServer)
+        .get('/auth/me')
+        .set('Cookie', [`access_token=${newRawAccessToken}`]);
+
+      expect(meRes.status).toBe(200);
+      expect(meRes.body.email).toBe(step2Email);
+    });
+
+    it('LOGOUT: POST /auth/logout clears both access_token (Path=/) and refresh_token (Path=/auth) cookies and returns NO tokens in body', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: step2Email,
+        password: step2Password,
+      });
+
+      const accessToken = getAccessTokenFromCookie(loginRes);
+      const rawRefreshToken = getRefreshTokenFromCookie(loginRes);
+
+      const logoutRes = await request(httpServer)
+        .post('/auth/logout')
+        .set('Cookie', [
+          `access_token=${accessToken}`,
+          `refresh_token=${rawRefreshToken}`,
+        ]);
+
+      expect(logoutRes.status).toBe(200);
+      expect(logoutRes.body.message).toBe('Logged out successfully');
+      expect(logoutRes.body.access_token).toBeUndefined();
+      expect(logoutRes.body.refresh_token).toBeUndefined();
+
+      const setCookie = logoutRes.headers['set-cookie'] as unknown;
+      const cookies: string[] = Array.isArray(setCookie)
+        ? (setCookie as string[])
+        : typeof setCookie === 'string'
+          ? [setCookie]
+          : [];
+
+      const clearedAccess = cookies.find((c) => c.startsWith('access_token=;'));
+      expect(clearedAccess).toBeDefined();
+      expect(clearedAccess).toContain('Path=/');
+
+      const clearedRefresh = cookies.find((c) =>
+        c.startsWith('refresh_token=;'),
+      );
+      expect(clearedRefresh).toBeDefined();
+      expect(clearedRefresh).toContain('Path=/auth');
     });
   });
 });

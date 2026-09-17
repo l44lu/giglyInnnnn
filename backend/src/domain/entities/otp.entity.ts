@@ -1,3 +1,5 @@
+import { Role } from '../enums/role.enum';
+
 export class OtpEntity {
   id!: string;
   email!: string;
@@ -5,7 +7,7 @@ export class OtpEntity {
   firstName!: string;
   lastName!: string;
   passwordHash!: string;
-  role!: 'ADMIN' | 'WORKER' | 'RECRUITER';
+  role!: Role;
   attempts!: number;
   expiresAt!: Date;
   createdAt!: Date;

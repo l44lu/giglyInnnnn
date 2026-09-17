@@ -13,7 +13,7 @@ import { IResetPasswordUseCase } from '../../application/use-cases/auth/interfac
 import { IUserRepository } from '../../domain/repositories/user.repository.interface';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { Role } from '@prisma/client';
+import { Role } from '../../domain/enums/role.enum';
 import { UserResponseDto } from '../../application/dto/user/user-response.dto';
 import type { Request, Response } from 'express';
 
@@ -122,6 +122,17 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
 
       expect(loginUseCase.execute).toHaveBeenCalledWith(body);
       expect(mockRes.cookie).toHaveBeenCalledWith(
+        'access_token',
+        'access.jwt.token',
+        {
+          httpOnly: true,
+          secure: false,
+          sameSite: 'strict',
+          path: '/',
+          maxAge: 1 * 60 * 60 * 1000,
+        },
+      );
+      expect(mockRes.cookie).toHaveBeenCalledWith(
         'refresh_token',
         'raw.refresh.jwt.token',
         {
@@ -134,9 +145,11 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
       );
 
       expect(result).toEqual({
-        access_token: 'access.jwt.token',
         user: userResponse,
       });
+      expect(
+        (result as unknown as Record<string, unknown>).access_token,
+      ).toBeUndefined();
       expect(
         (result as unknown as Record<string, unknown>).refresh_token,
       ).toBeUndefined();
@@ -168,6 +181,16 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
         mockRes,
       );
 
+      expect(mockRes.cookie).toHaveBeenCalledWith(
+        'access_token',
+        'access.jwt.token',
+        expect.objectContaining({
+          secure: true,
+          httpOnly: true,
+          sameSite: 'strict',
+          path: '/',
+        }),
+      );
       expect(mockRes.cookie).toHaveBeenCalledWith(
         'refresh_token',
         'raw.refresh.jwt.token',
@@ -205,6 +228,17 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
         refresh_token: 'old.refresh.token',
       });
       expect(mockRes.cookie).toHaveBeenCalledWith(
+        'access_token',
+        'new.access.token',
+        {
+          httpOnly: true,
+          secure: false,
+          sameSite: 'strict',
+          path: '/',
+          maxAge: 1 * 60 * 60 * 1000,
+        },
+      );
+      expect(mockRes.cookie).toHaveBeenCalledWith(
         'refresh_token',
         'replacement.refresh.token',
         {
@@ -216,8 +250,11 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
         },
       );
       expect(result).toEqual({
-        access_token: 'new.access.token',
+        message: 'Tokens refreshed successfully',
       });
+      expect(
+        (result as unknown as Record<string, unknown>).access_token,
+      ).toBeUndefined();
       expect(
         (result as unknown as Record<string, unknown>).refresh_token,
       ).toBeUndefined();
@@ -279,6 +316,12 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
         secure: false,
         sameSite: 'strict',
         path: '/auth',
+      });
+      expect(mockRes.clearCookie).toHaveBeenCalledWith('access_token', {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'strict',
+        path: '/',
       });
     });
 

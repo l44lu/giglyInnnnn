@@ -54,7 +54,7 @@ const Login = () => {
 
       const data = response.data;
 
-      const authenticatedUser = await login(data.access_token, data.user);
+      const authenticatedUser = await login(data.user);
 
       await Swal.fire({
         icon: "success",
@@ -103,7 +103,7 @@ const Login = () => {
     <div className="min-h-screen flex w-full bg-white font-sans">
       <div
         className="hidden lg:flex w-1/2 text-white flex-col justify-between p-12 relative overflow-hidden bg-cover bg-center"
-        style={{ backgroundImage: "url('/signup-hero.png')" }}
+        style={{ backgroundImage: "url('/signuphero.jpeg')" }}
       >
         <div className="absolute inset-0 bg-slate-900/60 pointer-events-none"></div>
 

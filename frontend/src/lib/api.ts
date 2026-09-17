@@ -16,7 +16,7 @@ export const api = axios.create({
 });
 
 // Listener types for AuthContext synchronization
-type TokenRefreshListener = (newToken: string) => void;
+type TokenRefreshListener = (newToken?: string) => void;
 type AuthFailureListener = () => void;
 
 let tokenRefreshListeners: TokenRefreshListener[] = [];
@@ -36,7 +36,7 @@ export const onAuthFailure = (listener: AuthFailureListener) => {
   };
 };
 
-const notifyTokenRefreshed = (newToken: string) => {
+const notifyTokenRefreshed = (newToken?: string) => {
   tokenRefreshListeners.forEach((listener) => listener(newToken));
 };
 
@@ -44,31 +44,17 @@ const notifyAuthFailure = () => {
   authFailureListeners.forEach((listener) => listener());
 };
 
-// Request interceptor: attach Bearer token if present in localStorage
-api.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem("token");
-    if (token && config.headers) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error: unknown) =>
-    Promise.reject(error instanceof Error ? error : new Error(String(error))),
-);
-
 // Single-flight refresh state
 let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<void> | null = null;
 
 /**
  * Executes server-side refresh-token rotation via POST /auth/refresh.
  * Uses a bare axios call with credentials to ensure /auth/refresh is never intercepted recursively.
+ * The browser automatically transmits the HttpOnly refresh_token cookie and receives rotated cookies.
  */
-const executeRefresh = async (): Promise<string> => {
-  const response = await axios.post<{
-    access_token: string;
-  }>(
+const executeRefresh = async (): Promise<void> => {
+  await axios.post(
     `${baseURL}/auth/refresh`,
     {},
     {
@@ -77,22 +63,10 @@ const executeRefresh = async (): Promise<string> => {
     },
   );
 
-  const { access_token } = response.data;
-
-  if (!access_token) {
-    throw new Error("Invalid response received from refresh endpoint");
-  }
-
-  // Update storage with newly received access token
-  localStorage.setItem("token", access_token);
-
-  notifyTokenRefreshed(access_token);
-
-  return access_token;
+  notifyTokenRefreshed();
 };
 
 const handleRefreshFailure = () => {
-  localStorage.removeItem("token");
   notifyAuthFailure();
 
   if (
@@ -110,7 +84,7 @@ const handleRefreshFailure = () => {
  * If a refresh is already in flight, all waiting requests await the same promise.
  * Exactly ONE HTTP request is dispatched to /auth/refresh.
  */
-export const getRefreshedToken = async (): Promise<string> => {
+export const getRefreshedToken = async (): Promise<void> => {
   if (isRefreshing && refreshPromise) {
     return refreshPromise;
   }
@@ -167,12 +141,7 @@ api.interceptors.response.use(
     originalRequest._retry = true;
 
     try {
-      const newAccessToken = await getRefreshedToken();
-
-      if (originalRequest.headers) {
-        originalRequest.headers.Authorization = `Bearer ${newAccessToken}`;
-      }
-
+      await getRefreshedToken();
       return api(originalRequest);
     } catch (refreshError) {
       return Promise.reject(

@@ -70,16 +70,16 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
   // =========================================================================
 
   test("1. Concurrency: 3 simultaneous 401 responses (A, B, C) trigger exactly ONE /auth/refresh HTTP request with credentials and empty body", async () => {
-    localStorageMock.setItem("token", "access-token-A");
-
     let refreshCallCount = 0;
     let refreshConfigCaptured = null;
+    let cookieRotated = false;
 
     const mockAdapter = async (config) => {
       // Mock refresh endpoint
       if (config.url.endsWith("/auth/refresh")) {
         refreshCallCount++;
         refreshConfigCaptured = config;
+        cookieRotated = true;
 
         // Simulate network latency for refresh
         await new Promise((resolve) => setTimeout(resolve, 25));
@@ -101,23 +101,19 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
         auth: config.headers?.Authorization,
       });
 
-      // If called with old token A, fail with 401
-      if (config.headers?.Authorization === "Bearer access-token-A") {
+      // If called before rotation, fail with 401
+      if (!cookieRotated) {
         throw createAxios401(config);
       }
 
-      // If called with new token C, succeed with 200
-      if (config.headers?.Authorization === "Bearer access-token-C") {
-        return {
-          data: { success: true, resource: config.url },
-          status: 200,
-          statusText: "OK",
-          headers: {},
-          config,
-        };
-      }
-
-      throw createAxios401(config);
+      // If called after rotation (browser attaches new HttpOnly cookie), succeed with 200
+      return {
+        data: { success: true, resource: config.url },
+        status: 200,
+        statusText: "OK",
+        headers: {},
+        config,
+      };
     };
 
     api.defaults.adapter = mockAdapter;
@@ -159,23 +155,22 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
     assert.strictEqual(resC.data.success, true);
     assert.strictEqual(resC.data.resource, "/api/worker/notifications");
 
-    // 4. Stored access token updated, and NO refresh token in localStorage
-    assert.strictEqual(localStorageMock.getItem("token"), "access-token-C");
+    // 4. Stored access token is NOT in localStorage, and NO refresh token in localStorage
+    assert.strictEqual(localStorageMock.getItem("token"), null);
     assert.strictEqual(localStorageMock.getItem("refreshToken"), null);
 
     // 5. onTokenRefreshed listener was notified
     assert.strictEqual(tokenRefreshedEvents.length, 1);
-    assert.strictEqual(tokenRefreshedEvents[0], "access-token-C");
   });
 
   test("2. Concurrency with 5 requests under staggered network jitter yields exactly ONE /auth/refresh", async () => {
-    localStorageMock.setItem("token", "access-token-A");
-
     let refreshCallCount = 0;
+    let cookieRotated = false;
 
     const mockAdapter = async (config) => {
       if (config.url.endsWith("/auth/refresh")) {
         refreshCallCount++;
+        cookieRotated = true;
         await new Promise((resolve) => setTimeout(resolve, 40));
         return {
           data: {
@@ -188,7 +183,7 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
         };
       }
 
-      if (config.headers?.Authorization === "Bearer access-token-C") {
+      if (cookieRotated) {
         return {
           data: { ok: true, url: config.url },
           status: 200,
@@ -222,18 +217,18 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
       assert.strictEqual(r.status, 200);
       assert.strictEqual(r.data.ok, true);
     }
-    assert.strictEqual(localStorageMock.getItem("token"), "access-token-C");
+    assert.strictEqual(localStorageMock.getItem("token"), null);
     assert.strictEqual(localStorageMock.getItem("refreshToken"), null);
   });
 
   test("3. Subsequent Request D after rotation completion uses new access token without triggering refresh", async () => {
-    localStorageMock.setItem("token", "access-token-A");
-
     let refreshCallCount = 0;
+    let cookieRotated = false;
 
     const mockAdapter = async (config) => {
       if (config.url.endsWith("/auth/refresh")) {
         refreshCallCount++;
+        cookieRotated = true;
         return {
           data: {
             access_token: "access-token-C",
@@ -245,9 +240,9 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
         };
       }
 
-      if (config.headers?.Authorization === "Bearer access-token-C") {
+      if (cookieRotated) {
         return {
-          data: { ok: true, authHeader: config.headers.Authorization },
+          data: { ok: true, withCredentials: config.withCredentials },
           status: 200,
           statusText: "OK",
           headers: {},
@@ -270,9 +265,9 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
     const subsequentRes = await api.get("/api/subsequent");
     assert.strictEqual(subsequentRes.status, 200);
     assert.strictEqual(
-      subsequentRes.data.authHeader,
-      "Bearer access-token-C",
-      "Subsequent request must use new access token directly"
+      subsequentRes.data.withCredentials,
+      true,
+      "Subsequent request must send credentials automatically"
     );
     assert.strictEqual(
       refreshCallCount,
@@ -280,15 +275,15 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
       "Subsequent request must NOT trigger a second refresh"
     );
     assert.strictEqual(localStorageMock.getItem("refreshToken"), null);
+    assert.strictEqual(localStorageMock.getItem("token"), null);
   });
+
 
   // =========================================================================
   // GROUP 2: Token Storage & Lifecycle Invariants
   // =========================================================================
 
   test("4. Refresh token is NOT stored or accessible in localStorage before, during, or after refresh", async () => {
-    localStorageMock.setItem("token", "access-token-A");
-
     let tokenDuringRefresh = null;
     let credentialsFlag = false;
 
@@ -312,32 +307,22 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
     api.defaults.adapter = mockAdapter;
     axios.defaults.adapter = mockAdapter;
 
-    const token = await getRefreshedToken();
+    await getRefreshedToken();
 
-    assert.strictEqual(token, "access-token-C");
     assert.strictEqual(credentialsFlag, true, "Refresh request must have withCredentials: true");
     assert.strictEqual(
       tokenDuringRefresh,
       null,
       "Refresh token must never exist in localStorage during refresh"
     );
-    assert.strictEqual(localStorageMock.getItem("token"), "access-token-C");
+    assert.strictEqual(localStorageMock.getItem("token"), null, "Access token must not be in localStorage");
     assert.strictEqual(localStorageMock.getItem("refreshToken"), null);
   });
 
-  test("5. Update stored access_token occurs ONLY after receiving valid access_token from refresh", async () => {
-    localStorageMock.setItem("token", "access-token-A");
-
-    // Mock returns response missing access_token
+  test("5. Refresh network or HTTP failure triggers clean error handling without writing to localStorage", async () => {
     const mockAdapter = async (config) => {
       if (config.url.endsWith("/auth/refresh")) {
-        return {
-          data: {},
-          status: 200,
-          statusText: "OK",
-          headers: {},
-          config,
-        };
+        throw new Error("Network offline during refresh");
       }
       throw createAxios401(config);
     };
@@ -349,17 +334,18 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
       async () => {
         await getRefreshedToken();
       },
-      /Invalid response received from refresh endpoint/
+      /Network offline during refresh/
     );
 
-    // Stored tokens must NOT have been updated
+    // Stored tokens must NOT exist
     assert.strictEqual(
       localStorageMock.getItem("token"),
       null,
-      "Token must be purged upon refresh failure"
+      "Token must not exist in localStorage"
     );
     assert.strictEqual(localStorageMock.getItem("refreshToken"), null);
   });
+
 
   // =========================================================================
   // GROUP 3: Recursion Prevention & Excluded Routes
@@ -494,8 +480,6 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
   // =========================================================================
 
   test("9. Refresh failure (revoked/expired cookie) cleans storage, fires onAuthFailure, and rejects callers", async () => {
-    localStorageMock.setItem("token", "access-token-A");
-
     const mockAdapter = async (config) => {
       if (config.url.endsWith("/auth/refresh")) {
         throw createAxios401(config);
@@ -524,8 +508,6 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
   });
 
   test("10. Missing refresh cookie: backend 401 on /auth/refresh triggers auth failure without JS cookie detection", async () => {
-    localStorageMock.setItem("token", "expired-token");
-
     let refreshCalled = false;
 
     const mockAdapter = async (config) => {
@@ -558,8 +540,6 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
   // =========================================================================
 
   test("11. Logout sends POST /auth/logout with credentials, no body, and clears local credentials even on failure", async () => {
-    localStorageMock.setItem("token", "user-access-token");
-
     let logoutConfig = null;
 
     const mockAdapter = async (config) => {
@@ -583,8 +563,6 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
       await api.post("/auth/logout");
     } catch {
       // Intentionally caught: local credentials must be cleared regardless
-    } finally {
-      localStorageMock.removeItem("token");
     }
 
     assert.strictEqual(logoutConfig.withCredentials, true);
@@ -602,14 +580,14 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
   // =========================================================================
 
   test("12. Hydration flow: reload with expired access token successfully refreshes and hydrates /auth/me", async () => {
-    localStorageMock.setItem("token", "expired-access-token");
-
     let refreshDispatched = 0;
     let authMeDispatched = 0;
+    let cookieRotated = false;
 
     const mockAdapter = async (config) => {
       if (config.url.endsWith("/auth/refresh")) {
         refreshDispatched++;
+        cookieRotated = true;
         return {
           data: {
             access_token: "fresh-access-token",
@@ -623,7 +601,7 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
 
       if (config.url.endsWith("/auth/me")) {
         authMeDispatched++;
-        if (config.headers?.Authorization === "Bearer fresh-access-token") {
+        if (cookieRotated) {
           return {
             data: {
               id: "worker-99",
@@ -654,9 +632,9 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
     assert.strictEqual(response.data.id, "worker-99");
     assert.strictEqual(response.data.role, "WORKER");
     assert.strictEqual(refreshDispatched, 1, "Exactly ONE refresh for hydration");
-    assert.strictEqual(authMeDispatched, 2, "1 initial 401 + 1 retry with fresh token");
+    assert.strictEqual(authMeDispatched, 2, "1 initial 401 + 1 retry with fresh token cookie");
 
-    assert.strictEqual(localStorageMock.getItem("token"), "fresh-access-token");
+    assert.strictEqual(localStorageMock.getItem("token"), null, "No access token in localStorage");
     assert.strictEqual(localStorageMock.getItem("refreshToken"), null);
   });
 
@@ -685,13 +663,15 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
     assert.match(content, /refreshPromise/);
     assert.match(content, /originalRequest\._retry\s*=\s*true/);
 
-    // Verify no refreshToken storage or retrieval in api.ts
+    // Verify no refreshToken or accessToken storage or retrieval in api.ts
     assert.doesNotMatch(content, /localStorage\.setItem\("refreshToken"/);
     assert.doesNotMatch(content, /localStorage\.getItem\("refreshToken"/);
     assert.doesNotMatch(content, /localStorage\.removeItem\("refreshToken"/);
+    assert.doesNotMatch(content, /localStorage\.setItem\("token"/);
+    assert.doesNotMatch(content, /localStorage\.getItem\("token"/);
   });
 
-  test("14. Security Invariant: AuthContext.tsx never logs tokens and has zero client-side refreshToken references", () => {
+  test("14. Security Invariant: AuthContext.tsx never logs tokens and has zero client-side refreshToken or accessToken references", () => {
     const authContextPath = path.resolve(__dirname, "AuthContext.tsx");
     assert.strictEqual(fs.existsSync(authContextPath), true);
     const content = fs.readFileSync(authContextPath, "utf-8");
@@ -704,13 +684,15 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
     assert.doesNotMatch(content, /refreshToken/);
     assert.doesNotMatch(content, /refresh_token/);
 
+    // Ensure no token storage in AuthContext
+    assert.doesNotMatch(content, /localStorage\.setItem/);
+    assert.doesNotMatch(content, /localStorage\.getItem/);
+
     // Verify logout calls /auth/logout without a body
     assert.match(content, /api\.post\("\/auth\/logout"\)/);
   });
 
   test("15. Single-flight lock release: subsequent failures do not deadlock subsequent calls", async () => {
-    localStorageMock.setItem("token", "bad-token");
-
     let callCount = 0;
     const mockAdapter = async (config) => {
       if (config.url.endsWith("/auth/refresh")) {
@@ -728,9 +710,6 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
       await getRefreshedToken();
     });
 
-    // Reset access token for second attempt
-    localStorageMock.setItem("token", "bad-token-2");
-
     // Second attempt should execute fresh and not remain locked/deadlocked
     await assert.rejects(async () => {
       await getRefreshedToken();
@@ -739,7 +718,7 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
     assert.strictEqual(callCount, 2, "Lock was cleanly reset after first failure");
   });
 
-  test("16. Login flow: processes access_token and user without expecting or storing refresh_token in JavaScript", async () => {
+  test("16. Login flow: processes user into state without storing access_token or refresh_token in localStorage", async () => {
     // Simulates login response from backend
     const mockLoginResponse = {
       access_token: "new-login-jwt",
@@ -752,14 +731,17 @@ describe("Step 9C-8.3: Frontend Refresh Token HttpOnly Cookie Migration & Concur
       },
     };
 
-    // Client stores access token
-    localStorageMock.setItem("token", mockLoginResponse.access_token);
-
-    assert.strictEqual(localStorageMock.getItem("token"), "new-login-jwt");
+    // Client does NOT store access token in localStorage
+    assert.strictEqual(
+      localStorageMock.getItem("token"),
+      null,
+      "Access token must NOT be stored in localStorage upon login"
+    );
     assert.strictEqual(
       localStorageMock.getItem("refreshToken"),
       null,
       "Refresh token must NOT be stored in localStorage upon login"
     );
   });
+
 });

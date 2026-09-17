@@ -23,6 +23,7 @@ import { IVerifyPasswordResetOtpUseCase } from './application/use-cases/auth/int
 import { IResetPasswordUseCase } from './application/use-cases/auth/interface/reset-password.use-case.interface';
 import { JwtAuthGuard } from './presentation/guards/jwt-auth.guard';
 import { RolesGuard } from './presentation/guards/roles.guard';
+import { PermissionsGuard } from './presentation/guards/permissions.guard';
 import { OtpRateLimitGuard } from './presentation/guards/otp-rate-limit.guard';
 import { LoginRateLimitGuard } from './presentation/guards/login-rate-limit.guard';
 import { LoggerModule } from './infrastructure/logger/logger.module';
@@ -35,6 +36,8 @@ import { IOtpRepository } from './domain/repositories/otp.repository.interface';
 import { PrismaOtpRepository } from './infrastructure/repositories/prisma-otp.repository';
 import { IPasswordResetRepository } from './domain/repositories/password-reset.repository.interface';
 import { PrismaPasswordResetRepository } from './infrastructure/repositories/prisma-password-reset.repository';
+import { IAuthorizationRepository } from './domain/repositories/authorization.repository.interface';
+import { PrismaAuthorizationRepository } from './infrastructure/repositories/prisma-authorization.repository';
 import { IEmailService } from './domain/services/email.service.interface';
 import { NodemailerEmailService } from './infrastructure/email/nodemailer-email.service';
 import { IOtpHashingService } from './domain/services/otp-hashing.service.interface';
@@ -109,6 +112,10 @@ import { RefreshTokenHashingService } from './infrastructure/crypto/refresh-toke
       useClass: PrismaPasswordResetRepository,
     },
     {
+      provide: IAuthorizationRepository,
+      useClass: PrismaAuthorizationRepository,
+    },
+    {
       provide: IEmailService,
       useClass: NodemailerEmailService,
     },
@@ -142,6 +149,7 @@ import { RefreshTokenHashingService } from './infrastructure/crypto/refresh-toke
     },
     JwtAuthGuard,
     RolesGuard,
+    PermissionsGuard,
     OtpRateLimitGuard,
     LoginRateLimitGuard,
     SecurityHeadersMiddleware,

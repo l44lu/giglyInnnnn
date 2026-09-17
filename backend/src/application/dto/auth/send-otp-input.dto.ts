@@ -7,7 +7,7 @@ import {
   MinLength,
   MaxLength,
 } from 'class-validator';
-import { Role } from '@prisma/client';
+import { Role } from '../../../domain/enums/role.enum';
 
 export const ALLOWED_REGISTRATION_ROLES = [
   Role.WORKER,

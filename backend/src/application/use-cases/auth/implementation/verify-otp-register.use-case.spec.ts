@@ -52,6 +52,7 @@ describe('VerifyOtpAndRegisterUseCase', () => {
       findAll: jest.fn(),
       update: jest.fn(),
       delete: jest.fn(),
+      updatePassword: jest.fn(),
     };
 
     otpRepository = {

@@ -27,64 +27,62 @@ describe("AuthContext and Auth State Logic", () => {
     };
   });
 
-  // State reducer / engine matching AuthContext logic
-  const createAuthEngine = (initialToken = null) => {
-    let user = null;
-    let token = initialToken;
+  // State reducer / engine matching AuthContext logic (Step 3: Cookie-based auth)
+  const createAuthEngine = (mockLoggedInUser = null) => {
+    let user = mockLoggedInUser;
     let isLoading = true;
 
     const refreshUser = async () => {
-      const currentToken = localStorageMock.getItem("token");
-      if (!currentToken) {
-        user = null;
-        token = null;
-        return null;
-      }
-
       try {
-        const response = await apiMock.get("/auth/me", {
-          headers: { Authorization: `Bearer ${currentToken}` },
-        });
+        const response = await apiMock.get("/auth/me");
         user = response.data;
         return response.data;
-      } catch (err) {
-        localStorageMock.removeItem("token");
-        token = null;
+      } catch {
         user = null;
         return null;
       }
     };
 
     const initializeAuth = async () => {
-      const storedToken = localStorageMock.getItem("token");
-      if (storedToken) {
+      try {
         await refreshUser();
+      } finally {
+        isLoading = false;
       }
-      isLoading = false;
     };
 
-    const login = async (newToken, initialUser) => {
-      localStorageMock.setItem("token", newToken);
-      token = newToken;
-      if (initialUser) {
-        user = initialUser;
+    const login = async (userOrToken, initialUser) => {
+      const resolvedUser =
+        typeof userOrToken === "object" && userOrToken !== null
+          ? userOrToken
+          : initialUser;
+
+      if (resolvedUser) {
+        user = resolvedUser;
       } else {
         await refreshUser();
       }
+      return user;
     };
 
-    const logout = () => {
-      localStorageMock.removeItem("token");
-      token = null;
-      user = null;
+    const logout = async () => {
+      try {
+        if (apiMock.post) {
+          await apiMock.post("/auth/logout");
+        }
+      } catch {
+        // Silently catch network or server errors; local state clearance must always complete
+      } finally {
+        user = null;
+      }
     };
 
     return {
       getState: () => ({
         user,
-        token,
+        token: null,
         role: user?.role ?? null,
-        isAuthenticated: !!user && !!token,
+        isAuthenticated: !!user,
         isLoading,
       }),
       initializeAuth,
@@ -93,6 +91,7 @@ describe("AuthContext and Auth State Logic", () => {
       logout,
     };
   };
+
 
   test("1. Initial state starts with isLoading = true", () => {
     const auth = createAuthEngine();
@@ -103,6 +102,11 @@ describe("AuthContext and Auth State Logic", () => {
   });
 
   test("2. No existing authentication -> unauthenticated state", async () => {
+    apiMock.get = async () => {
+      const error = new Error("Unauthorized");
+      error.response = { status: 401 };
+      throw error;
+    };
     const auth = createAuthEngine();
     await auth.initializeAuth();
     const state = auth.getState();
@@ -114,7 +118,6 @@ describe("AuthContext and Auth State Logic", () => {
   });
 
   test("3. Existing valid authentication -> /auth/me is called and state is authenticated", async () => {
-    localStorageMock.setItem("token", "valid-worker-token");
     let authMeCalled = false;
 
     apiMock.get = async (url) => {
@@ -133,7 +136,7 @@ describe("AuthContext and Auth State Logic", () => {
       throw new Error("unexpected url");
     };
 
-    const auth = createAuthEngine("valid-worker-token");
+    const auth = createAuthEngine();
     await auth.initializeAuth();
 
     assert.strictEqual(authMeCalled, true);
@@ -142,11 +145,10 @@ describe("AuthContext and Auth State Logic", () => {
     assert.strictEqual(state.isAuthenticated, true);
     assert.strictEqual(state.role, "WORKER");
     assert.strictEqual(state.user?.firstName, "Alex");
+    assert.strictEqual(localStorageMock.getItem("token"), null);
   });
 
   test("4. /auth/me successfully returns an ADMIN", async () => {
-    localStorageMock.setItem("token", "valid-admin-token");
-
     apiMock.get = async (url) => {
       if (url === "/auth/me") {
         return {
@@ -161,18 +163,17 @@ describe("AuthContext and Auth State Logic", () => {
       }
     };
 
-    const auth = createAuthEngine("valid-admin-token");
+    const auth = createAuthEngine();
     await auth.initializeAuth();
 
     const state = auth.getState();
     assert.strictEqual(state.role, "ADMIN");
     assert.strictEqual(state.isAuthenticated, true);
     assert.strictEqual(state.user?.role, "ADMIN");
+    assert.strictEqual(localStorageMock.getItem("token"), null);
   });
 
   test("5. /auth/me successfully returns a WORKER", async () => {
-    localStorageMock.setItem("token", "valid-worker-token");
-
     apiMock.get = async (url) => {
       if (url === "/auth/me") {
         return {
@@ -187,17 +188,16 @@ describe("AuthContext and Auth State Logic", () => {
       }
     };
 
-    const auth = createAuthEngine("valid-worker-token");
+    const auth = createAuthEngine();
     await auth.initializeAuth();
 
     const state = auth.getState();
     assert.strictEqual(state.role, "WORKER");
     assert.strictEqual(state.isAuthenticated, true);
+    assert.strictEqual(localStorageMock.getItem("token"), null);
   });
 
   test("6. /auth/me successfully returns a RECRUITER", async () => {
-    localStorageMock.setItem("token", "valid-recruiter-token");
-
     apiMock.get = async (url) => {
       if (url === "/auth/me") {
         return {
@@ -212,24 +212,23 @@ describe("AuthContext and Auth State Logic", () => {
       }
     };
 
-    const auth = createAuthEngine("valid-recruiter-token");
+    const auth = createAuthEngine();
     await auth.initializeAuth();
 
     const state = auth.getState();
     assert.strictEqual(state.role, "RECRUITER");
     assert.strictEqual(state.isAuthenticated, true);
+    assert.strictEqual(localStorageMock.getItem("token"), null);
   });
 
   test("7. /auth/me returns 401 -> authentication state and token are cleared", async () => {
-    localStorageMock.setItem("token", "expired-token");
-
     apiMock.get = async () => {
       const error = new Error("Request failed with status code 401");
       error.response = { status: 401 };
       throw error;
     };
 
-    const auth = createAuthEngine("expired-token");
+    const auth = createAuthEngine();
     await auth.initializeAuth();
 
     const state = auth.getState();
@@ -242,7 +241,7 @@ describe("AuthContext and Auth State Logic", () => {
 
   test("8. Logout clears authentication state and token", async () => {
     const auth = createAuthEngine();
-    await auth.login("valid-token", {
+    await auth.login({
       id: "user-1",
       email: "test@gigly.com",
       role: "WORKER",
@@ -251,7 +250,7 @@ describe("AuthContext and Auth State Logic", () => {
     });
 
     assert.strictEqual(auth.getState().isAuthenticated, true);
-    assert.strictEqual(localStorageMock.getItem("token"), "valid-token");
+    assert.strictEqual(localStorageMock.getItem("token"), null, "No access token in localStorage");
 
     auth.logout();
 
@@ -261,6 +260,7 @@ describe("AuthContext and Auth State Logic", () => {
     assert.strictEqual(state.token, null);
     assert.strictEqual(localStorageMock.getItem("token"), null);
   });
+
 
   test("9. Authenticated user does not contain password or passwordHash", async () => {
     const auth = createAuthEngine();
@@ -322,7 +322,6 @@ describe("AuthContext and Auth State Logic", () => {
 
     // 2. Complete authentication via AuthContext
     const authenticatedUser = await authEngine.login(
-      response.data.access_token,
       response.data.user,
     );
 
@@ -367,7 +366,6 @@ describe("AuthContext and Auth State Logic", () => {
 
     const apiPostMock = async () => ({
       data: {
-        access_token: "jwt-admin-token",
         user: { id: "admin-1", email: "admin@gigly.com", role: "ADMIN", firstName: "Admin" },
       },
     });
@@ -393,7 +391,6 @@ describe("AuthContext and Auth State Logic", () => {
 
     const apiPostMock = async () => ({
       data: {
-        access_token: "jwt-worker-token",
         user: { id: "worker-1", email: "worker@gigly.com", role: "WORKER", firstName: "Worker" },
       },
     });
@@ -419,7 +416,6 @@ describe("AuthContext and Auth State Logic", () => {
 
     const apiPostMock = async () => ({
       data: {
-        access_token: "jwt-recruiter-token",
         user: { id: "recruiter-1", email: "recruiter@gigly.com", role: "RECRUITER", firstName: "Recruiter" },
       },
     });
@@ -470,7 +466,6 @@ describe("AuthContext and Auth State Logic", () => {
 
     const apiPostMock = async () => ({
       data: {
-        access_token: "jwt-guest-token",
         user: { id: "guest-1", email: "guest@gigly.com", role: "UNSUPPORTED_ROLE", firstName: "Guest" },
       },
     });
@@ -502,7 +497,6 @@ describe("AuthContext and Auth State Logic", () => {
       eventSequence.push("api:login");
       return {
         data: {
-          access_token: "jwt-token",
           user: { id: "1", email: "admin@gigly.com", role: "ADMIN", firstName: "Admin" },
         },
       };
@@ -743,7 +737,7 @@ describe("AuthContext and Auth State Logic", () => {
     // 1. Worker is authenticated and can access /worker/dashboard
     assert.strictEqual(auth.getState().isAuthenticated, true);
     assert.strictEqual(auth.getState().role, "WORKER");
-    assert.strictEqual(localStorageMock.getItem("token"), "worker-jwt-token");
+    assert.strictEqual(localStorageMock.getItem("token"), null, "No token in localStorage");
 
     const accessBeforeLogout = evaluateProtectedRoute({
       authContext: auth.getState(),
@@ -799,7 +793,7 @@ describe("AuthContext and Auth State Logic", () => {
     // 1. Recruiter is authenticated and can access /recruiter/dashboard
     assert.strictEqual(auth.getState().isAuthenticated, true);
     assert.strictEqual(auth.getState().role, "RECRUITER");
-    assert.strictEqual(localStorageMock.getItem("token"), "recruiter-jwt-token");
+    assert.strictEqual(localStorageMock.getItem("token"), null, "No token in localStorage");
 
     const accessBeforeLogout = evaluateProtectedRoute({
       authContext: auth.getState(),
@@ -855,7 +849,8 @@ describe("AuthContext and Auth State Logic", () => {
     // 1. Admin is authenticated and can access /admin/dashboard
     assert.strictEqual(auth.getState().isAuthenticated, true);
     assert.strictEqual(auth.getState().role, "ADMIN");
-    assert.strictEqual(localStorageMock.getItem("token"), "admin-jwt-token");
+    assert.strictEqual(localStorageMock.getItem("token"), null, "No token in localStorage");
+
 
     const accessBeforeLogout = evaluateProtectedRoute({
       authContext: auth.getState(),
@@ -1090,7 +1085,7 @@ describe("AuthContext and Auth State Logic", () => {
     // 1. Authenticate user
     const initialAuth = createAuthEngine();
     await initialAuth.initializeAuth();
-    await initialAuth.login("session-token", {
+    await initialAuth.login({
       id: "admin-99",
       email: "admin99@gigly.com",
       role: "ADMIN",
@@ -1099,15 +1094,20 @@ describe("AuthContext and Auth State Logic", () => {
     });
 
     assert.strictEqual(initialAuth.getState().isAuthenticated, true);
-    assert.strictEqual(localStorageMock.getItem("token"), "session-token");
+    assert.strictEqual(localStorageMock.getItem("token"), null, "No token in localStorage");
 
     // 2. Perform Logout
     simulateLogoutAction({ authEngine: initialAuth, navigateMock: () => {} });
     assert.strictEqual(localStorageMock.getItem("token"), null);
     assert.strictEqual(initialAuth.getState().isAuthenticated, false);
 
-    // 3. Simulate application reload / mount by instantiating new auth engine from localStorage
-    const reloadedAuth = createAuthEngine(localStorageMock.getItem("token"));
+    // 3. Simulate application reload / mount by instantiating new auth engine (unauthenticated session)
+    apiMock.get = async () => {
+      const error = new Error("Unauthorized");
+      error.response = { status: 401 };
+      throw error;
+    };
+    const reloadedAuth = createAuthEngine();
     await reloadedAuth.initializeAuth();
 
     // 4. Verify reloaded state remains unauthenticated
@@ -1128,4 +1128,5 @@ describe("AuthContext and Auth State Logic", () => {
     assert.strictEqual(accessAfterReload.to, "/login");
     assert.strictEqual(accessAfterReload.replace, true);
   });
+
 });

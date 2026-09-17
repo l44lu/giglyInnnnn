@@ -9,6 +9,7 @@ import {
   Menu,
   X,
   LogOut,
+  User,
 } from "lucide-react";
 import { useAuth } from "@/context";
 
@@ -24,7 +25,12 @@ export const WorkerSidebar: React.FC<WorkerSidebarProps> = ({
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+
+  const displayName =
+    `${user?.firstName ?? ""}`.trim() || `${user?.lastName ?? ""}`.trim()
+      ? `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim()
+      : "Worker";
 
   const handleLogout = () => {
     void logout();
@@ -171,18 +177,14 @@ export const WorkerSidebar: React.FC<WorkerSidebarProps> = ({
       <div className="pt-4 border-t border-slate-200/70 mt-auto group">
         <div className="p-1.5 rounded-xl hover:bg-slate-200/40 transition">
           <div className="flex items-center gap-3">
-            <img
-              src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80"
-              alt="Michael Carter"
-              className="w-10 h-10 rounded-full object-cover ring-2 ring-white shadow-sm shrink-0"
-            />
+            <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 ring-2 ring-white shadow-sm">
+              <User className="w-5 h-5 text-slate-500" />
+            </div>
             <div className="min-w-0">
               <h4 className="text-sm font-semibold text-slate-900 truncate">
-                Michael Carter
+                {displayName}
               </h4>
-              <p className="text-xs text-slate-500 truncate">
-                Freelance Worker
-              </p>
+              <p className="text-xs text-slate-500 truncate">Worker</p>
             </div>
           </div>
 

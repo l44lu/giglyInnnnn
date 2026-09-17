@@ -1,8 +1,12 @@
+import { Role } from '../enums/role.enum';
+
+export { Role };
+
 export class UserEntities {
   id!: string;
   email!: string;
   passWordHash!: string;
-  role!: 'ADMIN' | 'WORKER' | 'RECRUITER';
+  role!: Role;
   firstName!: string;
   lastName!: string;
   isActive: boolean = true;
@@ -17,8 +21,5 @@ export class UserEntities {
 
   canAuthenticate(): boolean {
     return this.isActive === true && this.isBlocked === false;
-  }
-  unAuthenticate(): boolean {
-    return this.isActive === false && this.isBlocked === true;
   }
 }

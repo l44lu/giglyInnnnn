@@ -1,23 +1,28 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, LogOut } from "lucide-react";
+import { Bell, LogOut, User } from "lucide-react";
 import { useAuth } from "@/context";
 
 interface AdminHeaderProps {
   adminName?: string;
   adminRole?: string;
-  adminAvatar?: string;
   className?: string;
 }
 
 export const AdminHeader: React.FC<AdminHeaderProps> = ({
-  adminName = "Sarah Jenkins",
-  adminRole = "Super Admin",
-  adminAvatar = "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+  adminName,
+  adminRole,
   className = "",
 }) => {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { user, logout } = useAuth();
+
+  const displayName =
+    adminName ??
+    (`${user?.firstName ?? ""}`.trim() || `${user?.lastName ?? ""}`.trim()
+      ? `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim()
+      : "Admin");
+  const displayRole = adminRole ?? "Administrator";
 
   const handleLogout = () => {
     void logout();
@@ -42,17 +47,15 @@ export const AdminHeader: React.FC<AdminHeaderProps> = ({
         {/* Profile Card with Hover/Focus-within Logout Action */}
         <div className="relative group pl-2">
           <div className="flex items-center gap-3 cursor-pointer py-1">
-            <img
-              src={adminAvatar}
-              alt={adminName}
-              className="w-9 h-9 rounded-full object-cover ring-1 ring-slate-200 shadow-2xs"
-            />
+            <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center shrink-0 ring-1 ring-slate-200 shadow-2xs">
+              <User className="w-4 h-4 text-slate-500" />
+            </div>
             <div className="min-w-0 text-left">
               <h4 className="text-sm font-semibold text-slate-900 leading-tight">
-                {adminName}
+                {displayName}
               </h4>
               <p className="text-[11px] text-slate-500 font-normal">
-                {adminRole}
+                {displayRole}
               </p>
             </div>
           </div>

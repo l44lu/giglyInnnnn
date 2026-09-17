@@ -7,7 +7,7 @@ import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh
 import { IRefreshTokenHashingService } from '../../../../domain/services/refresh-token-hashing.service.interface';
 import { RefreshTokenHashingService } from '../../../../infrastructure/crypto/refresh-token-hashing.service';
 import { UserEntities } from '../../../../domain/entities/user.entities';
-import { Role } from '@prisma/client';
+import { Role } from '../../../../domain/enums/role.enum';
 import { RefreshTokenEntity } from '../../../../domain/entities/refresh-token.entity';
 
 describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
