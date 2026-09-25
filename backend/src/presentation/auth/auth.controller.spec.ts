@@ -1,5 +1,9 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { UnauthorizedException } from '@nestjs/common';
+import {
+  UnauthorizedException,
+  BadRequestException,
+  NotFoundException,
+} from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { ILoginUseCase } from '../../application/use-cases/auth/interface/login.use-case.interface';
 import { IRefreshUseCase } from '../../application/use-cases/auth/interface/refresh.use-case.interface';
@@ -10,11 +14,17 @@ import { ILogoutUseCase } from '../../application/use-cases/auth/interface/logou
 import { IForgotPasswordUseCase } from '../../application/use-cases/auth/interface/forgot-password.use-case.interface';
 import { IVerifyPasswordResetOtpUseCase } from '../../application/use-cases/auth/interface/verify-password-reset-otp.use-case.interface';
 import { IResetPasswordUseCase } from '../../application/use-cases/auth/interface/reset-password.use-case.interface';
+import { IChangePasswordUseCase } from '../../application/use-cases/auth/interface/change-password.use-case.interface';
 import { IUserRepository } from '../../domain/repositories/user.repository.interface';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { Role } from '../../domain/enums/role.enum';
 import { UserResponseDto } from '../../application/dto/user/user-response.dto';
+import { ChangePasswordInputDto } from '../../application/dto/auth/change-password-input.dto';
+import { JwtAuthGuard } from '../guards/jwt-auth.guard';
+import { RolesGuard } from '../guards/roles.guard';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
 
 describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', () => {
@@ -26,6 +36,7 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
   let forgotPasswordUseCase: jest.Mocked<IForgotPasswordUseCase>;
   let verifyPasswordResetOtpUseCase: jest.Mocked<IVerifyPasswordResetOtpUseCase>;
   let resetPasswordUseCase: jest.Mocked<IResetPasswordUseCase>;
+  let changePasswordUseCase: jest.Mocked<IChangePasswordUseCase>;
   let configService: jest.Mocked<ConfigService>;
 
   beforeEach(async () => {
@@ -57,6 +68,10 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
       execute: jest.fn(),
     };
 
+    changePasswordUseCase = {
+      execute: jest.fn(),
+    };
+
     configService = {
       get: jest.fn(),
     } as unknown as jest.Mocked<ConfigService>;
@@ -79,6 +94,7 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
           useValue: verifyPasswordResetOtpUseCase,
         },
         { provide: IResetPasswordUseCase, useValue: resetPasswordUseCase },
+        { provide: IChangePasswordUseCase, useValue: changePasswordUseCase },
         {
           provide: IUserRepository,
           useValue: { findById: jest.fn(), findByEmail: jest.fn() },
@@ -488,6 +504,73 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
       await expect(controller.resetPassword(body)).rejects.toThrow(
         UnauthorizedException,
       );
+    });
+  });
+
+  describe('POST /auth/change-password', () => {
+    it('should delegate to changePasswordUseCase with authenticated userId and body', async () => {
+      const response = { message: 'Password changed successfully' };
+      changePasswordUseCase.execute.mockResolvedValue(response);
+
+      const body: ChangePasswordInputDto = {
+        currentPassword: 'OldPassword123!',
+        newPassword: 'NewPassword123!',
+      };
+
+      const result = await controller.changePassword('user-uuid-1', body);
+
+      expect(changePasswordUseCase.execute).toHaveBeenCalledWith(
+        'user-uuid-1',
+        body,
+      );
+      expect(result).toEqual(response);
+    });
+
+    it('should propagate BadRequestException when current password is wrong', async () => {
+      changePasswordUseCase.execute.mockRejectedValue(
+        new BadRequestException('Current password is incorrect'),
+      );
+
+      const body: ChangePasswordInputDto = {
+        currentPassword: 'WrongPassword123!',
+        newPassword: 'NewPassword123!',
+      };
+
+      await expect(
+        controller.changePassword('user-uuid-1', body),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should propagate NotFoundException when user is not found', async () => {
+      changePasswordUseCase.execute.mockRejectedValue(
+        new NotFoundException('User not found'),
+      );
+
+      const body: ChangePasswordInputDto = {
+        currentPassword: 'OldPassword123!',
+        newPassword: 'NewPassword123!',
+      };
+
+      await expect(
+        controller.changePassword('non-existent-user', body),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should have JwtAuthGuard and RolesGuard configured', () => {
+      const guards = Reflect.getMetadata(
+        '__guards__',
+        controller.changePassword,
+      );
+      expect(guards).toBeDefined();
+      expect(guards).toContain(JwtAuthGuard);
+      expect(guards).toContain(RolesGuard);
+    });
+
+    it('should have @Roles(Role.ADMIN, Role.WORKER, Role.RECRUITER) configured', () => {
+      const reflector = new Reflector();
+      const roles = reflector.get<Role[]>(ROLES_KEY, controller.changePassword);
+      expect(roles).toBeDefined();
+      expect(roles).toEqual([Role.ADMIN, Role.WORKER, Role.RECRUITER]);
     });
   });
 });

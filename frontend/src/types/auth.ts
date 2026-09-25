@@ -7,6 +7,10 @@ export interface User {
   firstName: string;
   lastName: string;
   createdAt?: string;
+  phone?: string | null;
+  location?: string | null;
+  bio?: string | null;
+  avatarUrl?: string | null;
 }
 
 export interface AuthResponse {

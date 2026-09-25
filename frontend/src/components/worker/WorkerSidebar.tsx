@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutGrid,
@@ -12,20 +12,89 @@ import {
   User,
 } from "lucide-react";
 import { useAuth } from "@/context";
+import { getAvatarVersion, fetchWorkerAvatarBlob } from "@/lib/worker-api";
 
-interface WorkerSidebarProps {
+export interface WorkerSidebarProps {
   activeTab?: string;
   className?: string;
+  avatarVersion?: string | number;
 }
 
 export const WorkerSidebar: React.FC<WorkerSidebarProps> = ({
   activeTab = "dashboard",
   className = "",
+  avatarVersion: propAvatarVersion,
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { user, logout } = useAuth();
+
+  const [syncedVersion, setSyncedVersion] = useState<
+    string | number | undefined
+  >(() => getAvatarVersion());
+
+  useEffect(() => {
+    const handleVersionUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent<number>;
+      setSyncedVersion(customEvent.detail);
+    };
+    window.addEventListener(
+      "gigly:avatar-version-updated",
+      handleVersionUpdate,
+    );
+    return () => {
+      window.removeEventListener(
+        "gigly:avatar-version-updated",
+        handleVersionUpdate,
+      );
+    };
+  }, []);
+
+  const activeVersion = propAvatarVersion ?? syncedVersion;
+  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
+  const [avatarLoadError, setAvatarLoadError] = useState<boolean>(false);
+
+  const rawAvatarUrl = user?.avatarUrl?.trim();
+
+  useEffect(() => {
+    let isMounted = true;
+    let localUrl: string | null = null;
+
+    const loadAvatar = async () => {
+      if (!rawAvatarUrl) {
+        return;
+      }
+
+      try {
+        const blob = await fetchWorkerAvatarBlob(activeVersion);
+        if (!isMounted) return;
+        if (blob) {
+          localUrl = URL.createObjectURL(blob);
+          setAvatarObjectUrl(localUrl);
+          setAvatarLoadError(false);
+        } else {
+          setAvatarObjectUrl(null);
+        }
+      } catch {
+        if (isMounted) {
+          setAvatarObjectUrl(null);
+          setAvatarLoadError(true);
+        }
+      }
+    };
+
+    void loadAvatar();
+
+    return () => {
+      isMounted = false;
+      if (localUrl) {
+        URL.revokeObjectURL(localUrl);
+      }
+    };
+  }, [rawAvatarUrl, activeVersion]);
+
+  const currentAvatarUrl = rawAvatarUrl ? avatarObjectUrl : null;
 
   const displayName =
     `${user?.firstName ?? ""}`.trim() || `${user?.lastName ?? ""}`.trim()
@@ -175,10 +244,29 @@ export const WorkerSidebar: React.FC<WorkerSidebarProps> = ({
 
       {/* User Profile Card with Hover/Focus Logout Action */}
       <div className="pt-4 border-t border-slate-200/70 mt-auto group">
-        <div className="p-1.5 rounded-xl hover:bg-slate-200/40 transition">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 ring-2 ring-white shadow-sm">
-              <User className="w-5 h-5 text-slate-500" />
+        <div
+          className={`p-1.5 rounded-xl transition ${
+            isCurrentActive("profile", "/worker/profile")
+              ? "bg-slate-200/70"
+              : "hover:bg-slate-200/40"
+          }`}
+        >
+          <Link
+            to="/worker/profile"
+            className="flex items-center gap-3 cursor-pointer"
+            aria-label="View worker profile"
+          >
+            <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 ring-2 ring-white shadow-sm overflow-hidden">
+              {currentAvatarUrl && !avatarLoadError ? (
+                <img
+                  src={currentAvatarUrl}
+                  alt={displayName}
+                  onError={() => setAvatarLoadError(true)}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <User className="w-5 h-5 text-slate-500" />
+              )}
             </div>
             <div className="min-w-0">
               <h4 className="text-sm font-semibold text-slate-900 truncate">
@@ -186,7 +274,7 @@ export const WorkerSidebar: React.FC<WorkerSidebarProps> = ({
               </h4>
               <p className="text-xs text-slate-500 truncate">Worker</p>
             </div>
-          </div>
+          </Link>
 
           {/* Reveal on hover or keyboard focus-within */}
           <div className="overflow-hidden transition-all duration-200 max-h-0 opacity-0 group-hover:max-h-12 group-hover:opacity-100 group-focus-within:max-h-12 group-focus-within:opacity-100">

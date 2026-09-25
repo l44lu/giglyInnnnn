@@ -2019,4 +2019,119 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       expect(clearedRefresh).toContain('Path=/auth');
     });
   });
+
+  describe('PHASE 19: Step 2C — Authenticated Change Password Verification', () => {
+    const changePwEmail = 'e2e_step2c_changepw@gigly.com';
+    const initialPassword = 'InitialPassword123!';
+    const updatedPassword = 'BrandNewPassword456!';
+    let changePwUserId: string;
+
+    beforeAll(async () => {
+      const passwordHash = await bcrypt.hash(initialPassword, 10);
+      const user = await prismaService.user.upsert({
+        where: { email: changePwEmail },
+        update: { passwordHash },
+        create: {
+          email: changePwEmail,
+          passwordHash,
+          role: { connect: { code: Role.WORKER } },
+          firstName: 'ChangePw',
+          lastName: 'Tester',
+        },
+      });
+      changePwUserId = user.id;
+    });
+
+    afterAll(async () => {
+      await prismaService.refreshToken.deleteMany({
+        where: { userId: changePwUserId },
+      });
+      await prismaService.user.deleteMany({
+        where: { id: changePwUserId },
+      });
+    });
+
+    it('REJECTS UNAUTHENTICATED: POST /auth/change-password returns 401 when access_token cookie is missing', async () => {
+      const res = await request(httpServer).post('/auth/change-password').send({
+        currentPassword: initialPassword,
+        newPassword: updatedPassword,
+      });
+
+      expect(res.status).toBe(401);
+    });
+
+    it('REJECTS WRONG CURRENT PASSWORD: returns 400 when currentPassword does not match', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: changePwEmail,
+        password: initialPassword,
+      });
+      const accessToken = getAccessTokenFromCookie(loginRes);
+
+      const res = await request(httpServer)
+        .post('/auth/change-password')
+        .set('Cookie', [`access_token=${accessToken}`])
+        .send({
+          currentPassword: 'WrongPassword999!',
+          newPassword: updatedPassword,
+        });
+
+      expect(res.status).toBe(400);
+      expect(res.body.message).toBe('Current password is incorrect');
+    });
+
+    it('REJECTS INVALID DTO: returns 400 when newPassword is less than 8 characters', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: changePwEmail,
+        password: initialPassword,
+      });
+      const accessToken = getAccessTokenFromCookie(loginRes);
+
+      const res = await request(httpServer)
+        .post('/auth/change-password')
+        .set('Cookie', [`access_token=${accessToken}`])
+        .send({
+          currentPassword: initialPassword,
+          newPassword: 'short',
+        });
+
+      expect(res.status).toBe(400);
+    });
+
+    it('SUCCESSFUL PASSWORD CHANGE: returns 200, updates password, allows login with new password and rejects old password', async () => {
+      const loginRes = await request(httpServer).post('/auth/login').send({
+        email: changePwEmail,
+        password: initialPassword,
+      });
+      const accessToken = getAccessTokenFromCookie(loginRes);
+
+      // 1. Change password
+      const changeRes = await request(httpServer)
+        .post('/auth/change-password')
+        .set('Cookie', [`access_token=${accessToken}`])
+        .send({
+          currentPassword: initialPassword,
+          newPassword: updatedPassword,
+        });
+
+      expect(changeRes.status).toBe(200);
+      expect(changeRes.body.message).toBe('Password changed successfully');
+      expect(changeRes.body.passwordHash).toBeUndefined();
+      expect(changeRes.body.passWordHash).toBeUndefined();
+
+      // 2. Old password fails authentication
+      const oldLoginRes = await request(httpServer).post('/auth/login').send({
+        email: changePwEmail,
+        password: initialPassword,
+      });
+      expect(oldLoginRes.status).toBe(401);
+
+      // 3. New password succeeds authentication
+      const newLoginRes = await request(httpServer).post('/auth/login').send({
+        email: changePwEmail,
+        password: updatedPassword,
+      });
+      expect(newLoginRes.status).toBe(201);
+      expect(newLoginRes.body.user.email).toBe(changePwEmail);
+    });
+  });
 });

@@ -22,12 +22,14 @@ import { ILogoutUseCase } from '../../application/use-cases/auth/interface/logou
 import { IForgotPasswordUseCase } from '../../application/use-cases/auth/interface/forgot-password.use-case.interface';
 import { IVerifyPasswordResetOtpUseCase } from '../../application/use-cases/auth/interface/verify-password-reset-otp.use-case.interface';
 import { IResetPasswordUseCase } from '../../application/use-cases/auth/interface/reset-password.use-case.interface';
+import { IChangePasswordUseCase } from '../../application/use-cases/auth/interface/change-password.use-case.interface';
 import { LoginInputDto } from '../../application/dto/auth/login-input.dto';
 import { SendOtpInputDto } from '../../application/dto/auth/send-otp-input.dto';
 import { VerifyOtpInputDto } from '../../application/dto/auth/verify-otp-input.dto';
 import { ForgotPasswordInputDto } from '../../application/dto/auth/forgot-password-input.dto';
 import { VerifyResetOtpInputDto } from '../../application/dto/auth/verify-reset-otp-input.dto';
 import { ResetPasswordInputDto } from '../../application/dto/auth/reset-password-input.dto';
+import { ChangePasswordInputDto } from '../../application/dto/auth/change-password-input.dto';
 import { Role } from '../../domain/enums/role.enum';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
@@ -57,6 +59,8 @@ export class AuthController {
     private readonly verifyPasswordResetOtpUseCase: IVerifyPasswordResetOtpUseCase,
     @Inject(IResetPasswordUseCase)
     private readonly resetPasswordUseCase: IResetPasswordUseCase,
+    @Inject(IChangePasswordUseCase)
+    private readonly changePasswordUseCase: IChangePasswordUseCase,
     private readonly configService: ConfigService,
   ) {}
 
@@ -239,5 +243,16 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() body: ResetPasswordInputDto) {
     return this.resetPasswordUseCase.execute(body);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.WORKER, Role.RECRUITER)
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() body: ChangePasswordInputDto,
+  ) {
+    return this.changePasswordUseCase.execute(userId, body);
   }
 }

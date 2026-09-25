@@ -87,11 +87,15 @@ describe('Step 9C-9.2: Frontend Content Security Policy (CSP) Verification', () 
     );
   });
 
-  test('5. img-src allows \'self\', data:, and only verified external avatar hosts', () => {
+  test('5. img-src allows \'self\', data:, blob:, and only verified external avatar hosts', () => {
     const imgSrc = parsedCsp.get('img-src');
     assert.ok(imgSrc, 'img-src directive must be present');
     assert.ok(imgSrc.includes("'self'"), "img-src must allow 'self'");
     assert.ok(imgSrc.includes('data:'), 'img-src must allow data: for SVGs');
+    assert.ok(
+      imgSrc.includes('blob:'),
+      'img-src must allow blob: for object URLs created from private authenticated avatars',
+    );
     assert.ok(
       imgSrc.includes('https://images.unsplash.com'),
       'img-src must allow https://images.unsplash.com for avatars',

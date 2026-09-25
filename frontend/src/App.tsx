@@ -6,6 +6,7 @@ import Login from "./pages/Login";
 import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import WorkerDashboard from "./pages/worker/WorkerDashboard";
+import WorkerProfile from "./pages/worker/WorkerProfile";
 import RecruiterDashboard from "./pages/recruiter/RecruiterDashboard";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 
@@ -20,12 +21,20 @@ function App() {
           <Route path="/signup" element={<Signup />} />
           <Route path="/forgot-password" element={<ForgotPassword />} />
 
-          {/* Protected Dashboard Routes */}
+          {/* Protected Worker Routes */}
           <Route
             path="/worker/dashboard"
             element={
               <ProtectedRoute allowedRoles={["WORKER"]}>
                 <WorkerDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/worker/profile"
+            element={
+              <ProtectedRoute allowedRoles={["WORKER"]}>
+                <WorkerProfile />
               </ProtectedRoute>
             }
           />

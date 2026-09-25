@@ -207,6 +207,13 @@ describe('PrismaUserRepository', () => {
           },
           isActive: true,
           isBlocked: false,
+          workerProfile: {
+            create: {
+              availabilityStatus: 'available',
+              isOpenToWork: true,
+              totalCompletedGigs: 0,
+            },
+          },
         },
         include: { role: true },
       });
@@ -266,10 +273,93 @@ describe('PrismaUserRepository', () => {
           },
           isActive: true,
           isBlocked: false,
+          workerProfile: {
+            create: {
+              availabilityStatus: 'available',
+              isOpenToWork: true,
+              totalCompletedGigs: 0,
+            },
+          },
         },
         include: { role: true },
       });
       expect(result.role).toBe(Role.WORKER);
+    });
+  });
+
+  describe('update', () => {
+    it('persists avatarUrl through update()', async () => {
+      const avatarKey = 'avatars/worker/user-uuid-1/test-uuid.webp';
+      (prismaService.user.update as jest.Mock).mockResolvedValue({
+        ...mockUserRecord,
+        avatarUrl: avatarKey,
+      });
+
+      const result = await repository.update('user-uuid-1', {
+        avatarUrl: avatarKey,
+      });
+
+      expect(prismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-uuid-1' },
+        data: { avatarUrl: avatarKey },
+        include: { role: true },
+      });
+      expect(result.avatarUrl).toBe(avatarKey);
+    });
+
+    it('maps avatarUrl from Prisma to UserEntities when retrieved', async () => {
+      const avatarKey = 'avatars/worker/user-uuid-1/avatar.png';
+      (prismaService.user.findUnique as jest.Mock).mockResolvedValue({
+        ...mockUserRecord,
+        avatarUrl: avatarKey,
+      });
+
+      const result = await repository.findById('user-uuid-1');
+
+      expect(result?.avatarUrl).toBe(avatarKey);
+    });
+
+    it('persists phone, location, and bio in update() and maps to UserEntities', async () => {
+      (prismaService.user.update as jest.Mock).mockResolvedValue({
+        ...mockUserRecord,
+        phone: '+1234567890',
+        location: 'Seattle, WA',
+        bio: 'Senior worker bio',
+      });
+
+      const result = await repository.update('user-uuid-1', {
+        phone: '+1234567890',
+        location: 'Seattle, WA',
+        bio: 'Senior worker bio',
+      });
+
+      expect(prismaService.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-uuid-1' },
+        data: {
+          phone: '+1234567890',
+          location: 'Seattle, WA',
+          bio: 'Senior worker bio',
+        },
+        include: { role: true },
+      });
+      expect(result.phone).toBe('+1234567890');
+      expect(result.location).toBe('Seattle, WA');
+      expect(result.bio).toBe('Senior worker bio');
+    });
+
+    it('maps phone, location, and bio from Prisma to UserEntities when retrieved', async () => {
+      (prismaService.user.findUnique as jest.Mock).mockResolvedValue({
+        ...mockUserRecord,
+        phone: '+9876543210',
+        location: 'Kochi, India',
+        bio: 'Worker profile bio description',
+      });
+
+      const result = await repository.findById('user-uuid-1');
+
+      expect(result?.phone).toBe('+9876543210');
+      expect(result?.location).toBe('Kochi, India');
+      expect(result?.bio).toBe('Worker profile bio description');
     });
   });
 

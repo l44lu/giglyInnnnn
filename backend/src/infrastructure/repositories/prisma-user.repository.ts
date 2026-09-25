@@ -33,6 +33,10 @@ export class PrismaUserRepository
       role: user.role.code as Role,
       firstName: user.firstName,
       lastName: user.lastName,
+      phone: user.phone,
+      location: user.location,
+      bio: user.bio,
+      avatarUrl: user.avatarUrl,
       isActive: user.isActive,
       isBlocked: user.isBlocked,
       createdAt: user.createdAt,
@@ -78,8 +82,21 @@ export class PrismaUserRepository
         },
         firstName: data.firstName!,
         lastName: data.lastName!,
+        ...(data.phone !== undefined && { phone: data.phone }),
+        ...(data.location !== undefined && { location: data.location }),
+        ...(data.bio !== undefined && { bio: data.bio }),
+        ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
         isActive: data.isActive ?? true,
         isBlocked: data.isBlocked ?? false,
+        ...(roleCode === Role.WORKER && {
+          workerProfile: {
+            create: {
+              availabilityStatus: 'available',
+              isOpenToWork: true,
+              totalCompletedGigs: 0,
+            },
+          },
+        }),
       },
       include: {
         role: true,
@@ -97,6 +114,10 @@ export class PrismaUserRepository
       ...(data.passWordHash && { passwordHash: data.passWordHash }),
       ...(data.firstName && { firstName: data.firstName }),
       ...(data.lastName && { lastName: data.lastName }),
+      ...(data.phone !== undefined && { phone: data.phone }),
+      ...(data.location !== undefined && { location: data.location }),
+      ...(data.bio !== undefined && { bio: data.bio }),
+      ...(data.avatarUrl !== undefined && { avatarUrl: data.avatarUrl }),
       ...(data.isActive !== undefined && { isActive: data.isActive }),
       ...(data.isBlocked !== undefined && { isBlocked: data.isBlocked }),
       ...(data.role && {
