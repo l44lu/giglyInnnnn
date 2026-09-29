@@ -8,35 +8,49 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_DB: gigly
     ports:
-      - "5433:5432"
+      - "127.0.0.1:5433:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gigly"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
     container_name: gigly_backend
+    restart: unless-stopped
     ports:
       - "3000:3000"
     environment:
       DATABASE_URL: "postgresql://postgres:password@db:5432/gigly"
+      NODE_ENV: development
     depends_on:
-      - db
+      db:
+        condition: service_healthy
     volumes:
       - ./backend/logs:/app/logs
     env_file:
       - ./backend/.env
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: gigly_frontend
+    restart: unless-stopped
     ports:
-      - "5173:5173"
-    depends_on:
-      - backend
+      - "5173:80"
 
 volumes:
   postgres_data:
