@@ -25,8 +25,13 @@ export class UserMapper {
     }
 
     if (user.avatarUrl) {
-      dto.avatarUrl =
-        user.role === Role.WORKER ? '/worker/profile/avatar' : user.avatarUrl;
+      if (user.role === Role.WORKER) {
+        dto.avatarUrl = '/worker/profile/avatar';
+      } else if (user.role === Role.RECRUITER) {
+        dto.avatarUrl = '/recruiter/profile/avatar';
+      } else {
+        dto.avatarUrl = user.avatarUrl;
+      }
     }
 
     return dto;

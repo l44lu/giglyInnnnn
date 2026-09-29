@@ -4,7 +4,9 @@ import { PrismaService } from './infrastructure/prisma/prisma.service';
 import { SecurityHeadersMiddleware } from './presentation/middleware/security-headers.middleware';
 import { AuthController } from './presentation/auth/auth.controller';
 import { WorkerProfileController } from './presentation/worker/worker-profile.controller';
+import { RecruiterProfileController } from './presentation/recruiter/recruiter-profile.controller';
 import { SkillsController } from './presentation/skills/skills.controller';
+import { AdminUserManagementController } from './presentation/admin/admin-user-management.controller';
 import { LoginUseCase } from './application/use-cases/auth/implementation/login.use-case';
 import { RefreshUseCase } from './application/use-cases/auth/implementation/refresh.use-case';
 import { SendOtpUseCase } from './application/use-cases/auth/implementation/send-otp.use-case';
@@ -72,6 +74,40 @@ import { IRefreshTokenHashingService } from './domain/services/refresh-token-has
 import { RefreshTokenHashingService } from './infrastructure/crypto/refresh-token-hashing.service';
 import { IFileStorageService } from './domain/services/file-storage.service.interface';
 import { S3FileStorageService } from './infrastructure/storage/s3-file-storage.service';
+import { IRecruiterProfileRepository } from './domain/repositories/recruiter-profile.repository.interface';
+import { PrismaRecruiterProfileRepository } from './infrastructure/repositories/prisma-recruiter-profile.repository';
+import { ICompanyRepository } from './domain/repositories/company.repository.interface';
+import { PrismaCompanyRepository } from './infrastructure/repositories/prisma-company.repository';
+import { IGetRecruiterProfileUseCase } from './application/use-cases/recruiter-profile/interface/get-recruiter-profile.use-case.interface';
+import { GetRecruiterProfileUseCase } from './application/use-cases/recruiter-profile/implementation/get-recruiter-profile.use-case';
+import { IUpdateRecruiterProfileUseCase } from './application/use-cases/recruiter-profile/interface/update-recruiter-profile.use-case.interface';
+import { UpdateRecruiterProfileUseCase } from './application/use-cases/recruiter-profile/implementation/update-recruiter-profile.use-case';
+import { IUpdateRecruiterPersonalProfileUseCase } from './application/use-cases/recruiter-profile/interface/update-recruiter-personal-profile.use-case.interface';
+import { UpdateRecruiterPersonalProfileUseCase } from './application/use-cases/recruiter-profile/implementation/update-recruiter-personal-profile.use-case';
+import { IGetRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/interface/get-recruiter-avatar.use-case.interface';
+import { GetRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/implementation/get-recruiter-avatar.use-case';
+import { IUploadRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/interface/upload-recruiter-avatar.use-case.interface';
+import { UploadRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/implementation/upload-recruiter-avatar.use-case';
+import { IGetRecruiterCompanyUseCase } from './application/use-cases/recruiter-profile/interface/get-recruiter-company.use-case.interface';
+import { GetRecruiterCompanyUseCase } from './application/use-cases/recruiter-profile/implementation/get-recruiter-company.use-case';
+import { IUpdateRecruiterCompanyUseCase } from './application/use-cases/recruiter-profile/interface/update-recruiter-company.use-case.interface';
+import { UpdateRecruiterCompanyUseCase } from './application/use-cases/recruiter-profile/implementation/update-recruiter-company.use-case';
+import { IUploadRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/interface/upload-recruiter-company-logo.use-case.interface';
+import { UploadRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/implementation/upload-recruiter-company-logo.use-case';
+import { IGetRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/interface/get-recruiter-company-logo.use-case.interface';
+import { GetRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/implementation/get-recruiter-company-logo.use-case';
+import { IListAdminUserUseCase } from './application/use-cases/admin-user-management/interface/list-admin-users.use-case.interface';
+import { ListAdminUserUseCase } from './application/use-cases/admin-user-management/implementation/list-admin-users.use-case';
+import { IGetAdminUserUseCase } from './application/use-cases/admin-user-management/interface/get-admin-user.use-case.interface';
+import { GetAdminUserUseCase } from './application/use-cases/admin-user-management/implementation/get-admin-user.use-case';
+import { IUpdateAdminUserUseCase } from './application/use-cases/admin-user-management/interface/update-admin-user.use-case.interface';
+import { UpdateAdminUserUseCase } from './application/use-cases/admin-user-management/implementation/update-admin-user.use-case';
+import { IChangeAdminUserRoleUseCase } from './application/use-cases/admin-user-management/interface/change-admin-user-role.use-case.interface';
+import { ChangeAdminUserRoleUseCase } from './application/use-cases/admin-user-management/implementation/change-admin-user-role.use-case';
+import { ISetAdminUserBlockStatusUseCase } from './application/use-cases/admin-user-management/interface/set-admin-user-block-status.use-case.interface';
+import { SetAdminUserBlockStatusUseCase } from './application/use-cases/admin-user-management/implementation/set-admin-user-block-status.use-case';
+import { IDeactivateAdminUserUseCase } from './application/use-cases/admin-user-management/interface/deactivate-admin-user.use-case.interface';
+import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-management/implementation/deactivate-admin-user.use-case';
 
 @Module({
   imports: [
@@ -104,7 +140,13 @@ import { S3FileStorageService } from './infrastructure/storage/s3-file-storage.s
       },
     }),
   ],
-  controllers: [AuthController, WorkerProfileController, SkillsController],
+  controllers: [
+    AuthController,
+    WorkerProfileController,
+    RecruiterProfileController,
+    SkillsController,
+    AdminUserManagementController,
+  ],
   providers: [
     PrismaService,
     {
@@ -226,6 +268,74 @@ import { S3FileStorageService } from './infrastructure/storage/s3-file-storage.s
     {
       provide: IUpdateWorkerSkillsUseCase,
       useClass: UpdateWorkerSkillsUseCase,
+    },
+    {
+      provide: IRecruiterProfileRepository,
+      useClass: PrismaRecruiterProfileRepository,
+    },
+    {
+      provide: ICompanyRepository,
+      useClass: PrismaCompanyRepository,
+    },
+    {
+      provide: IGetRecruiterProfileUseCase,
+      useClass: GetRecruiterProfileUseCase,
+    },
+    {
+      provide: IUpdateRecruiterProfileUseCase,
+      useClass: UpdateRecruiterProfileUseCase,
+    },
+    {
+      provide: IUpdateRecruiterPersonalProfileUseCase,
+      useClass: UpdateRecruiterPersonalProfileUseCase,
+    },
+    {
+      provide: IGetRecruiterAvatarUseCase,
+      useClass: GetRecruiterAvatarUseCase,
+    },
+    {
+      provide: IUploadRecruiterAvatarUseCase,
+      useClass: UploadRecruiterAvatarUseCase,
+    },
+    {
+      provide: IGetRecruiterCompanyUseCase,
+      useClass: GetRecruiterCompanyUseCase,
+    },
+    {
+      provide: IUpdateRecruiterCompanyUseCase,
+      useClass: UpdateRecruiterCompanyUseCase,
+    },
+    {
+      provide: IUploadRecruiterCompanyLogoUseCase,
+      useClass: UploadRecruiterCompanyLogoUseCase,
+    },
+    {
+      provide: IGetRecruiterCompanyLogoUseCase,
+      useClass: GetRecruiterCompanyLogoUseCase,
+    },
+    {
+      provide: IListAdminUserUseCase,
+      useClass: ListAdminUserUseCase,
+    },
+    {
+      provide: IGetAdminUserUseCase,
+      useClass: GetAdminUserUseCase,
+    },
+    {
+      provide: IUpdateAdminUserUseCase,
+      useClass: UpdateAdminUserUseCase,
+    },
+    {
+      provide: IChangeAdminUserRoleUseCase,
+      useClass: ChangeAdminUserRoleUseCase,
+    },
+    {
+      provide: ISetAdminUserBlockStatusUseCase,
+      useClass: SetAdminUserBlockStatusUseCase,
+    },
+    {
+      provide: IDeactivateAdminUserUseCase,
+      useClass: DeactivateAdminUserUseCase,
     },
     JwtAuthGuard,
     RolesGuard,

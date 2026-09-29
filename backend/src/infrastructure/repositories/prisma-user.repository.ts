@@ -97,6 +97,11 @@ export class PrismaUserRepository
             },
           },
         }),
+        ...(roleCode === Role.RECRUITER && {
+          recruiterProfile: {
+            create: {},
+          },
+        }),
       },
       include: {
         role: true,
