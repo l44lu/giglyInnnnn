@@ -220,7 +220,7 @@ describe('PrismaUserRepository', () => {
       expect(result.role).toBe(Role.WORKER);
     });
 
-    it('creates user with RECRUITER role by connecting role code', async () => {
+    it('creates user with RECRUITER role and initializes recruiterProfile', async () => {
       const recruiterRecord = createMockUserRecord('RECRUITER');
       (prismaService.user.create as jest.Mock).mockResolvedValue(
         recruiterRecord,
@@ -242,6 +242,9 @@ describe('PrismaUserRepository', () => {
           lastName: 'User',
           role: {
             connect: { code: Role.RECRUITER },
+          },
+          recruiterProfile: {
+            create: {},
           },
           isActive: true,
           isBlocked: false,

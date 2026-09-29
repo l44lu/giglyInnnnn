@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   LayoutGrid,
@@ -14,15 +14,21 @@ import {
   User,
 } from "lucide-react";
 import { useAuth } from "@/context";
+import {
+  getAvatarVersion,
+  fetchRecruiterAvatarBlob,
+} from "@/lib/recruiter-api";
 
-interface RecruiterSidebarProps {
+export interface RecruiterSidebarProps {
   activeTab?: string;
   className?: string;
+  avatarVersion?: string | number;
 }
 
 export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
   activeTab = "dashboard",
   className = "",
+  avatarVersion: propAvatarVersion,
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -33,6 +39,80 @@ export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
     `${user?.firstName ?? ""}`.trim() || `${user?.lastName ?? ""}`.trim()
       ? `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim()
       : "Recruiter";
+
+  const [syncedVersion, setSyncedVersion] = useState<
+    string | number | undefined
+  >(() => getAvatarVersion());
+
+  useEffect(() => {
+    const handleVersionUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent<number>;
+      setSyncedVersion(customEvent.detail);
+    };
+    window.addEventListener(
+      "gigly:recruiter-avatar-version-updated",
+      handleVersionUpdate,
+    );
+    window.addEventListener(
+      "gigly:avatar-version-updated",
+      handleVersionUpdate,
+    );
+    return () => {
+      window.removeEventListener(
+        "gigly:recruiter-avatar-version-updated",
+        handleVersionUpdate,
+      );
+      window.removeEventListener(
+        "gigly:avatar-version-updated",
+        handleVersionUpdate,
+      );
+    };
+  }, []);
+
+  const activeVersion = propAvatarVersion ?? syncedVersion;
+  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
+  const [avatarLoadError, setAvatarLoadError] = useState<boolean>(false);
+
+  const rawAvatarUrl = user?.avatarUrl?.trim();
+
+  useEffect(() => {
+    let isMounted = true;
+    let localUrl: string | null = null;
+
+    const loadAvatar = async () => {
+      if (!rawAvatarUrl) {
+        return;
+      }
+
+      try {
+        const blob = await fetchRecruiterAvatarBlob(activeVersion);
+        if (!isMounted) return;
+        if (blob) {
+          localUrl = URL.createObjectURL(blob);
+          setAvatarObjectUrl(localUrl);
+          setAvatarLoadError(false);
+        } else {
+          setAvatarObjectUrl(null);
+        }
+      } catch {
+        if (isMounted) {
+          setAvatarObjectUrl(null);
+          setAvatarLoadError(true);
+        }
+      }
+    };
+
+    void loadAvatar();
+
+    return () => {
+      isMounted = false;
+      if (localUrl) {
+        URL.revokeObjectURL(localUrl);
+      }
+    };
+  }, [rawAvatarUrl, activeVersion]);
+
+  const currentAvatarUrl = rawAvatarUrl ? avatarObjectUrl : null;
 
   const handleLogout = () => {
     void logout();
@@ -189,10 +269,29 @@ export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
 
       {/* User Profile Card with Hover/Focus Logout Action */}
       <div className="pt-4 border-t border-slate-200/70 mt-auto group">
-        <div className="p-1.5 rounded-xl hover:bg-slate-200/40 transition">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 ring-2 ring-white shadow-sm">
-              <User className="w-5 h-5 text-slate-500" />
+        <div
+          className={`p-1.5 rounded-xl transition ${
+            isCurrentActive("profile", "/recruiter/profile")
+              ? "bg-slate-200/70"
+              : "hover:bg-slate-200/40"
+          }`}
+        >
+          <Link
+            to="/recruiter/profile"
+            className="flex items-center gap-3 cursor-pointer"
+            aria-label="View recruiter profile"
+          >
+            <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 ring-2 ring-white shadow-sm overflow-hidden">
+              {currentAvatarUrl && !avatarLoadError ? (
+                <img
+                  src={currentAvatarUrl}
+                  alt={displayName}
+                  onError={() => setAvatarLoadError(true)}
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <User className="w-5 h-5 text-slate-500" />
+              )}
             </div>
             <div className="min-w-0">
               <h4 className="text-sm font-semibold text-slate-900 truncate">
@@ -200,7 +299,7 @@ export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
               </h4>
               <p className="text-xs text-slate-500 truncate">Recruiter</p>
             </div>
-          </div>
+          </Link>
 
           {/* Reveal on hover or keyboard focus-within */}
           <div className="overflow-hidden transition-all duration-200 max-h-0 opacity-0 group-hover:max-h-12 group-hover:opacity-100 group-focus-within:max-h-12 group-focus-within:opacity-100">

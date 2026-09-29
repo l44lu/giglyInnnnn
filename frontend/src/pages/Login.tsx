@@ -5,17 +5,45 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Briefcase, Mail } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context";
 import api from "@/lib/api";
 import { type AuthResponse, getDashboardPathForRole } from "@/types/auth";
 
 const Login = () => {
-  const { login } = useAuth();
+  const { login, isAuthenticated, isLoading: isAuthLoading, role } = useAuth();
   const navigate = useNavigate();
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-600 border-t-transparent" />
+          <p className="text-sm font-medium text-gray-600">
+            Verifying session...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (isAuthenticated) {
+    const targetPath = getDashboardPathForRole(role);
+
+    if (targetPath) {
+      return <Navigate to={targetPath} replace />;
+    }
+
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <p className="text-sm text-slate-600">
+          Your account role could not be recognized.
+        </p>
+      </div>
+    );
+  }
 
   const validateForm = () => {
     const newErrors: Record<string, string> = {};

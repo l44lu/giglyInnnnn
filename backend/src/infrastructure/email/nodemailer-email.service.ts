@@ -91,7 +91,7 @@ export class NodemailerEmailService implements IEmailService {
 
     try {
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Password reset OTP email sent to ${email} with ${otp}`);
+      this.logger.log(`Password reset OTP email sent to ${email} ${otp}`);
     } catch (error) {
       this.logger.error(
         `Failed to send password reset OTP email to ${email} `,
