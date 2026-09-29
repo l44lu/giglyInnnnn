@@ -7,6 +7,7 @@ import { WorkerProfileController } from './presentation/worker/worker-profile.co
 import { RecruiterProfileController } from './presentation/recruiter/recruiter-profile.controller';
 import { SkillsController } from './presentation/skills/skills.controller';
 import { AdminUserManagementController } from './presentation/admin/admin-user-management.controller';
+import { HealthController } from './presentation/health/health.controller';
 import { LoginUseCase } from './application/use-cases/auth/implementation/login.use-case';
 import { RefreshUseCase } from './application/use-cases/auth/implementation/refresh.use-case';
 import { SendOtpUseCase } from './application/use-cases/auth/implementation/send-otp.use-case';
@@ -146,6 +147,7 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
     RecruiterProfileController,
     SkillsController,
     AdminUserManagementController,
+    HealthController,
   ],
   providers: [
     PrismaService,
