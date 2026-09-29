@@ -7,24 +7,27 @@ export interface User {
   firstName: string;
   lastName: string;
   createdAt?: string;
+  phone?: string | null;
+  location?: string | null;
+  bio?: string | null;
+  avatarUrl?: string | null;
 }
 
 export interface AuthResponse {
-  access_token: string;
   user: User;
 }
 
 export interface RefreshResponse {
-  access_token: string;
+  message?: string;
 }
 
 export interface AuthContextType {
   user: User | null;
-  token: string | null;
+  token?: string | null;
   role: UserRole | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (token: string, user?: User) => Promise<User | null>;
+  login: (userOrToken?: User | string, user?: User) => Promise<User | null>;
   logout: () => Promise<void> | void;
   refreshUser: () => Promise<User | null>;
 }

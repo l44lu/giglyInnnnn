@@ -5,7 +5,7 @@ import React, {
   useCallback,
   useMemo,
 } from "react";
-import api, { onTokenRefreshed, onAuthFailure } from "@/lib/api";
+import api, { onAuthFailure } from "@/lib/api";
 import type { User, AuthContextType } from "@/types/auth";
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -14,46 +14,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem("token"),
-  );
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Subscribe to Axios token refresh & auth failure events
+  // Subscribe to Axios auth failure events (e.g. refresh failure or session expiry)
   useEffect(() => {
-    const unsubToken = onTokenRefreshed((newToken) => {
-      setToken(newToken);
-    });
-
     const unsubAuth = onAuthFailure(() => {
-      setToken(null);
       setUser(null);
     });
 
     return () => {
-      unsubToken();
       unsubAuth();
     };
   }, []);
 
-  // Hydrate user profile from backend /auth/me on mount or token change
+  // Hydrate user profile from backend /auth/me via browser HttpOnly access_token cookie
   const refreshUser = useCallback(async (): Promise<User | null> => {
-    const currentToken = localStorage.getItem("token");
-
-    if (!currentToken) {
-      setUser(null);
-      setToken(null);
-      return null;
-    }
-
     try {
       const response = await api.get<User>("/auth/me");
       setUser(response.data);
       return response.data;
     } catch {
-      // Token is invalid or expired and could not be refreshed
-      localStorage.removeItem("token");
-      setToken(null);
       setUser(null);
       return null;
     }
@@ -62,25 +42,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   // Initialize authentication on app launch
   useEffect(() => {
     const initializeAuth = async () => {
-      const storedToken = localStorage.getItem("token");
-      if (storedToken) {
+      try {
         await refreshUser();
+      } finally {
+        setIsLoading(false);
       }
-      setIsLoading(false);
     };
 
     void initializeAuth();
   }, [refreshUser]);
 
-  // Login handler: stores access token and sets user
+  // Login handler: sets authenticated user state (cookies are set by backend via Set-Cookie)
   const login = useCallback(
-    async (newToken: string, initialUser?: User): Promise<User | null> => {
-      localStorage.setItem("token", newToken);
-      setToken(newToken);
+    async (
+      userOrToken?: User | string,
+      maybeUser?: User,
+    ): Promise<User | null> => {
+      const resolvedUser =
+        typeof userOrToken === "object" && userOrToken !== null
+          ? userOrToken
+          : maybeUser;
 
-      if (initialUser) {
-        setUser(initialUser);
-        return initialUser;
+      if (resolvedUser) {
+        setUser(resolvedUser);
+        return resolvedUser;
       } else {
         return await refreshUser();
       }
@@ -88,15 +73,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
     [refreshUser],
   );
 
-  // Logout handler: revokes backend session family and cleans local credentials
+  // Logout handler: revokes backend session family, clears cookies, and resets user state
   const logout = useCallback(async () => {
     try {
       await api.post("/auth/logout");
     } catch {
-      // Silently catch network or server errors; local clearance must always complete
+      // Silently catch network or server errors; local state clearance must always complete
     } finally {
-      localStorage.removeItem("token");
-      setToken(null);
       setUser(null);
     }
   }, []);
@@ -104,15 +87,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({
   const value = useMemo<AuthContextType>(
     () => ({
       user,
-      token,
+      token: null,
       role: user?.role ?? null,
-      isAuthenticated: !!user && !!token,
+      isAuthenticated: !!user,
       isLoading,
       login,
       logout,
       refreshUser,
     }),
-    [user, token, isLoading, login, logout, refreshUser],
+    [user, isLoading, login, logout, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

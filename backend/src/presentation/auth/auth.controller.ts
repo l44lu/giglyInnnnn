@@ -22,13 +22,15 @@ import { ILogoutUseCase } from '../../application/use-cases/auth/interface/logou
 import { IForgotPasswordUseCase } from '../../application/use-cases/auth/interface/forgot-password.use-case.interface';
 import { IVerifyPasswordResetOtpUseCase } from '../../application/use-cases/auth/interface/verify-password-reset-otp.use-case.interface';
 import { IResetPasswordUseCase } from '../../application/use-cases/auth/interface/reset-password.use-case.interface';
+import { IChangePasswordUseCase } from '../../application/use-cases/auth/interface/change-password.use-case.interface';
 import { LoginInputDto } from '../../application/dto/auth/login-input.dto';
 import { SendOtpInputDto } from '../../application/dto/auth/send-otp-input.dto';
 import { VerifyOtpInputDto } from '../../application/dto/auth/verify-otp-input.dto';
 import { ForgotPasswordInputDto } from '../../application/dto/auth/forgot-password-input.dto';
 import { VerifyResetOtpInputDto } from '../../application/dto/auth/verify-reset-otp-input.dto';
 import { ResetPasswordInputDto } from '../../application/dto/auth/reset-password-input.dto';
-import { Role } from '@prisma/client';
+import { ChangePasswordInputDto } from '../../application/dto/auth/change-password-input.dto';
+import { Role } from '../../domain/enums/role.enum';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
@@ -57,6 +59,8 @@ export class AuthController {
     private readonly verifyPasswordResetOtpUseCase: IVerifyPasswordResetOtpUseCase,
     @Inject(IResetPasswordUseCase)
     private readonly resetPasswordUseCase: IResetPasswordUseCase,
+    @Inject(IChangePasswordUseCase)
+    private readonly changePasswordUseCase: IChangePasswordUseCase,
     private readonly configService: ConfigService,
   ) {}
 
@@ -83,6 +87,29 @@ export class AuthController {
     };
   }
 
+  private getAccessCookieOptions(): CookieOptions {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    return {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 1 * 60 * 60 * 1000,
+    };
+  }
+
+  private getClearAccessCookieOptions(): CookieOptions {
+    const isProduction =
+      this.configService.get<string>('NODE_ENV') === 'production';
+    return {
+      httpOnly: true,
+      secure: isProduction,
+      sameSite: 'strict',
+      path: '/',
+    };
+  }
+
   @Post('register/send-otp')
   @UseGuards(OtpRateLimitGuard)
   async sendOtp(@Body() body: SendOtpInputDto) {
@@ -103,6 +130,14 @@ export class AuthController {
   ) {
     const result = await this.loginUseCase.execute(body);
 
+    if (result.access_token) {
+      res.cookie(
+        'access_token',
+        result.access_token,
+        this.getAccessCookieOptions(),
+      );
+    }
+
     if (result.refresh_token) {
       res.cookie(
         'refresh_token',
@@ -112,7 +147,6 @@ export class AuthController {
     }
 
     return {
-      access_token: result.access_token,
       user: result.user,
     };
   }
@@ -135,6 +169,14 @@ export class AuthController {
       refresh_token: refreshToken,
     });
 
+    if (result.access_token) {
+      res.cookie(
+        'access_token',
+        result.access_token,
+        this.getAccessCookieOptions(),
+      );
+    }
+
     if (result.refresh_token) {
       res.cookie(
         'refresh_token',
@@ -144,7 +186,7 @@ export class AuthController {
     }
 
     return {
-      access_token: result.access_token,
+      message: 'Tokens refreshed successfully',
     };
   }
 
@@ -171,6 +213,7 @@ export class AuthController {
     });
 
     res.clearCookie('refresh_token', this.getClearCookieOptions());
+    res.clearCookie('access_token', this.getClearAccessCookieOptions());
 
     return result;
   }
@@ -200,5 +243,16 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async resetPassword(@Body() body: ResetPasswordInputDto) {
     return this.resetPasswordUseCase.execute(body);
+  }
+
+  @Post('change-password')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(Role.ADMIN, Role.WORKER, Role.RECRUITER)
+  @HttpCode(HttpStatus.OK)
+  async changePassword(
+    @CurrentUser('id') userId: string,
+    @Body() body: ChangePasswordInputDto,
+  ) {
+    return this.changePasswordUseCase.execute(userId, body);
   }
 }

@@ -2,7 +2,7 @@ import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
 import { UserEntities } from '../../../../domain/entities/user.entities';
 import { GetMeUseCase } from './get-me.use-case';
-import { Role } from '@prisma/client';
+import { Role } from '../../../../domain/enums/role.enum';
 
 describe('GetMeUseCase', () => {
   let useCase: GetMeUseCase;

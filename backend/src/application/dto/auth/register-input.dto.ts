@@ -7,7 +7,7 @@ import {
   MinLength,
   MaxLength,
 } from 'class-validator';
-import { Role } from '@prisma/client';
+import { Role } from '../../../domain/enums/role.enum';
 import { ALLOWED_REGISTRATION_ROLES } from './send-otp-input.dto';
 
 export class RegisterInputDto {

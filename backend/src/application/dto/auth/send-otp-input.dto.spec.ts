@@ -1,5 +1,5 @@
 import { validate } from 'class-validator';
-import { Role } from '@prisma/client';
+import { Role } from '../../../domain/enums/role.enum';
 import { SendOtpInputDto } from './send-otp-input.dto';
 
 describe('SendOtpInputDto Role Validation', () => {

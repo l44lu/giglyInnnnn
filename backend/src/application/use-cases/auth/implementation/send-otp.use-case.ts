@@ -9,7 +9,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { Role } from '@prisma/client';
+import { Role } from '../../../../domain/enums/role.enum';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
 import { IOtpRepository } from '../../../../domain/repositories/otp.repository.interface';
 import { IEmailService } from '../../../../domain/services/email.service.interface';
