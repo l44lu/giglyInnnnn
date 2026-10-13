@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
 import { CurrentUser } from '../decorators/current-user.decorator';
+import { BypassResponseWrapper } from '../decorators/bypass-response-wrapper.decorator';
 import { Role } from '../../domain/enums/role.enum';
 import { IGetRecruiterProfileUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-profile.use-case.interface';
 import { IUpdateRecruiterProfileUseCase } from '../../application/use-cases/recruiter-profile/interface/update-recruiter-profile.use-case.interface';
@@ -130,6 +131,7 @@ export class RecruiterProfileController {
   @Get('profile/avatar')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.RECRUITER)
+  @BypassResponseWrapper()
   async getAvatar(
     @CurrentUser('id') userId: string,
     @Res() res: Response,
@@ -186,6 +188,7 @@ export class RecruiterProfileController {
   @Get('company/logo')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.RECRUITER)
+  @BypassResponseWrapper()
   async getCompanyLogo(
     @CurrentUser('id') userId: string,
     @Res() res: Response,

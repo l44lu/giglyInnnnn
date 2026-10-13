@@ -1,9 +1,11 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { LogoutUseCase } from './logout.use-case';
 import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { IRefreshTokenHashingService } from '../../../../domain/services/refresh-token-hashing.service.interface';
+import {
+  ITokenService,
+  InvalidTokenError,
+} from '../../../../domain/services/token.service.interface';
 import { RefreshTokenHashingService } from '../../../../infrastructure/crypto/refresh-token-hashing.service';
 import { RefreshTokenEntity } from '../../../../domain/entities/refresh-token.entity';
 
@@ -11,8 +13,7 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
   let useCase: LogoutUseCase;
   let refreshTokenRepository: jest.Mocked<IRefreshTokenRepository>;
   let refreshTokenHashingService: IRefreshTokenHashingService;
-  let jwtService: jest.Mocked<JwtService>;
-  let configService: jest.Mocked<ConfigService>;
+  let tokenService: jest.Mocked<ITokenService>;
 
   const userId = 'user-uuid-123';
   const otherUserId = 'user-uuid-456';
@@ -22,11 +23,11 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
 
   beforeEach(() => {
     refreshTokenRepository = {
-      findByToken: jest.fn(),
       findByTokenHash: jest.fn(),
       deleteByTokenHash: jest.fn(),
       rotate: jest.fn(),
-      revokeFamily: jest.fn().mockResolvedValue(undefined),
+      revokeSession: jest.fn().mockResolvedValue(undefined),
+      revokeAllForUser: jest.fn().mockResolvedValue(undefined),
       create: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
@@ -35,23 +36,17 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
 
     refreshTokenHashingService = new RefreshTokenHashingService();
 
-    jwtService = {
-      verifyAsync: jest.fn().mockResolvedValue({ sub: userId }),
-      signAsync: jest.fn(),
-    } as unknown as jest.Mocked<JwtService>;
-
-    configService = {
-      get: jest.fn((key: string) => {
-        if (key === 'JWT_REFRESH_SECRET') return 'test-refresh-secret';
-        return null;
-      }),
-    } as unknown as jest.Mocked<ConfigService>;
+    tokenService = {
+      verifyRefreshToken: jest.fn().mockResolvedValue({ sub: userId }),
+      verifyAccessToken: jest.fn(),
+      issueAccessToken: jest.fn(),
+      issueRefreshToken: jest.fn(),
+    } as unknown as jest.Mocked<ITokenService>;
 
     useCase = new LogoutUseCase(
       refreshTokenRepository,
       refreshTokenHashingService,
-      jwtService,
-      configService,
+      tokenService,
     );
   });
 
@@ -69,13 +64,13 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
         useCase.execute(userId, null as unknown as { refresh_token: string }),
       ).rejects.toThrow(new BadRequestException('Refresh token is required'));
 
-      expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+      expect(tokenService.verifyRefreshToken).not.toHaveBeenCalled();
       expect(refreshTokenRepository.findByTokenHash).not.toHaveBeenCalled();
     });
 
     it('2. Invalid or tampered JWT signature throws 401 and does NOT revoke any family', async () => {
-      jwtService.verifyAsync.mockRejectedValue(
-        new Error('invalid signature error'),
+      tokenService.verifyRefreshToken.mockRejectedValue(
+        new InvalidTokenError('invalid signature error'),
       );
 
       await expect(
@@ -85,7 +80,7 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
       );
 
       expect(refreshTokenRepository.findByTokenHash).not.toHaveBeenCalled();
-      expect(refreshTokenRepository.revokeFamily).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.revokeSession).not.toHaveBeenCalled();
     });
   });
 
@@ -96,11 +91,11 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: tokenHash,
+          tokenHash,
           userId,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId,
+          sessionId: familyId,
           revokedAt: null,
         }),
       );
@@ -116,14 +111,16 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
         tokenHash,
       );
 
-      // Exactly the target family was revoked
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledTimes(1);
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledWith(
+      // Exactly the target session was revoked
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledTimes(1);
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledWith(
         familyId,
+        'LOGOUT',
       );
 
       // No new tokens were generated or persisted
-      expect(jwtService.signAsync).not.toHaveBeenCalled();
+      expect(tokenService.issueAccessToken).not.toHaveBeenCalled();
+      expect(tokenService.issueRefreshToken).not.toHaveBeenCalled();
       expect(refreshTokenRepository.create).not.toHaveBeenCalled();
       expect(refreshTokenRepository.rotate).not.toHaveBeenCalled();
     });
@@ -137,7 +134,7 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.revokeSession).not.toHaveBeenCalled();
     });
 
     it('5. Cross-user token: Token belonging to another user throws 401 and does NOT revoke', async () => {
@@ -146,11 +143,11 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: tokenHash,
+          tokenHash,
           userId: otherUserId, // Different user!
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId: 'other-user-family',
+          sessionId: 'other-user-family',
           revokedAt: null,
         }),
       );
@@ -161,21 +158,23 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.revokeSession).not.toHaveBeenCalled();
     });
 
     it('6. Token payload sub mismatch throws 401 and does NOT revoke', async () => {
-      jwtService.verifyAsync.mockResolvedValue({ sub: otherUserId });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: otherUserId,
+      });
 
       const tokenHash = refreshTokenHashingService.hash(rawRefreshJwt);
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: tokenHash,
+          tokenHash,
           userId,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId,
+          sessionId: familyId,
           revokedAt: null,
         }),
       );
@@ -186,7 +185,7 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.revokeSession).not.toHaveBeenCalled();
     });
 
     it('7. DB-expired token throws 401 and does NOT revoke any family', async () => {
@@ -195,11 +194,11 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: tokenHash,
+          tokenHash,
           userId,
           expiresAt: new Date(Date.now() - 1000 * 60), // Expired 1 min ago
           createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 8),
-          familyId,
+          sessionId: familyId,
           revokedAt: null,
         }),
       );
@@ -210,20 +209,20 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.revokeSession).not.toHaveBeenCalled();
     });
 
-    it('8. Already-revoked refresh token revokes family safely without resurrecting or issuing tokens', async () => {
+    it('8. Already-revoked refresh token revokes session safely without resurrecting or issuing tokens', async () => {
       const tokenHash = refreshTokenHashingService.hash(rawRefreshJwt);
 
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: tokenHash,
+          tokenHash,
           userId,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId,
+          sessionId: familyId,
           revokedAt: new Date(Date.now() - 1000 * 60 * 5), // Already revoked!
         }),
       );
@@ -233,30 +232,31 @@ describe('LogoutUseCase — Server-Side Refresh Family Revocation (9C-5)', () =>
       });
 
       expect(result).toEqual({ message: 'Logged out successfully' });
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledWith(
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledWith(
         familyId,
+        'LOGOUT',
       );
       expect(refreshTokenRepository.create).not.toHaveBeenCalled();
       expect(refreshTokenRepository.rotate).not.toHaveBeenCalled();
     });
 
-    it('9. Unexpected database failure during revokeFamily propagates naturally without conversion to 401', async () => {
+    it('9. Unexpected database failure during revokeSession propagates naturally without conversion to 401', async () => {
       const tokenHash = refreshTokenHashingService.hash(rawRefreshJwt);
 
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: tokenHash,
+          tokenHash,
           userId,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId,
+          sessionId: familyId,
           revokedAt: null,
         }),
       );
 
       const dbCrashError = new Error('Database connection pool exhausted');
-      refreshTokenRepository.revokeFamily.mockRejectedValue(dbCrashError);
+      refreshTokenRepository.revokeSession.mockRejectedValue(dbCrashError);
 
       await expect(
         useCase.execute(userId, { refresh_token: rawRefreshJwt }),

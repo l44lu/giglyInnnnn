@@ -70,10 +70,9 @@ describe('ResetPasswordUseCase', () => {
       update: jest.fn(),
       delete: jest.fn(),
       findByTokenHash: jest.fn(),
-      findByToken: jest.fn(),
       deleteByTokenHash: jest.fn(),
       rotate: jest.fn(),
-      revokeFamily: jest.fn(),
+      revokeSession: jest.fn(),
       revokeAllForUser: jest.fn(),
     };
 
@@ -161,6 +160,7 @@ describe('ResetPasswordUseCase', () => {
       // 3. Security Boundary: Revoke all active refresh sessions for this user
       expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
         sampleResetRecord.userId,
+        'PASSWORD_RESET',
       );
 
       // 4. Security Boundary: Consume single-use reset authorization token

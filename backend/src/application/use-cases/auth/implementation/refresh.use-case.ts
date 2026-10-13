@@ -2,24 +2,25 @@ import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
 import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { IRefreshTokenHashingService } from '../../../../domain/services/refresh-token-hashing.service.interface';
-import { JwtService, JwtSignOptions } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
-import * as crypto from 'crypto';
+import {
+  ITokenService,
+  InvalidTokenError,
+  RefreshTokenPayload,
+} from '../../../../domain/services/token.service.interface';
 import { RefreshInputDto } from '../../../dto/auth/refresh-input.dto';
 import { RefreshResponseDto } from '../../../dto/auth/refresh-response.dto';
-
 import { IRefreshUseCase } from '../interface/refresh.use-case.interface';
 
 @Injectable()
 export class RefreshUseCase implements IRefreshUseCase {
   constructor(
-    @Inject(IUserRepository) private userRepository: IUserRepository,
+    @Inject(IUserRepository) private readonly userRepository: IUserRepository,
     @Inject(IRefreshTokenRepository)
-    private refreshTokenRepository: IRefreshTokenRepository,
+    private readonly refreshTokenRepository: IRefreshTokenRepository,
     @Inject(IRefreshTokenHashingService)
-    private refreshTokenHashingService: IRefreshTokenHashingService,
-    private jwtService: JwtService,
-    private configService: ConfigService,
+    private readonly refreshTokenHashingService: IRefreshTokenHashingService,
+    @Inject(ITokenService)
+    private readonly tokenService: ITokenService,
   ) {}
 
   async execute(data: RefreshInputDto): Promise<RefreshResponseDto> {
@@ -27,25 +28,21 @@ export class RefreshUseCase implements IRefreshUseCase {
       throw new UnauthorizedException('Refresh token is required');
     }
 
-    let payload: { sub: string };
+    // 1. Verify the refresh JWT cryptographically through ITokenService
+    let payload: RefreshTokenPayload;
     try {
-      // verifying the refresh token signature and expiration
-      payload = await this.jwtService.verifyAsync<{ sub: string }>(
-        data.refresh_token,
-        {
-          secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        },
-      );
+      payload = await this.tokenService.verifyRefreshToken(data.refresh_token);
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
-      throw new UnauthorizedException('Invalid refresh token', errorMessage);
+      if (error instanceof InvalidTokenError) {
+        throw new UnauthorizedException('Invalid or revoked refresh token');
+      }
+      throw error;
     }
 
-    // Compute deterministic hash of incoming raw refresh token for database lookup
+    // 2. Compute deterministic hash of incoming raw refresh token for database lookup
     const tokenHash = this.refreshTokenHashingService.hash(data.refresh_token);
 
-    // Check if the token hash exists in the database
+    // 3. Check if the token hash exists in the database
     const savedToken =
       await this.refreshTokenRepository.findByTokenHash(tokenHash);
 
@@ -53,10 +50,13 @@ export class RefreshUseCase implements IRefreshUseCase {
       throw new UnauthorizedException('Invalid or revoked refresh token');
     }
 
-    // Refresh Token Reuse Detection (9C-4):
-    // If the token was already consumed/revoked, revoke the entire token family
+    // 4. Refresh Token Reuse Detection (9C-4):
+    // If the token was already consumed/revoked, revoke the entire session
     if (savedToken.revokedAt != null) {
-      await this.refreshTokenRepository.revokeFamily(savedToken.familyId);
+      await this.refreshTokenRepository.revokeSession(
+        savedToken.sessionId,
+        'REUSE_DETECTED',
+      );
       throw new UnauthorizedException('Invalid or revoked refresh token');
     }
 
@@ -64,6 +64,7 @@ export class RefreshUseCase implements IRefreshUseCase {
       throw new UnauthorizedException('Invalid or revoked refresh token');
     }
 
+    // 5. Load the live user and verify that the account can authenticate
     const user = await this.userRepository.findById(payload.sub);
 
     if (!user) {
@@ -75,45 +76,47 @@ export class RefreshUseCase implements IRefreshUseCase {
       throw new UnauthorizedException('Invalid or revoked refresh token');
     }
 
-    // section for generating new access token
-    const newPayload = { sub: user.id, email: user.email, role: user.role };
-    const access_token = await this.jwtService.signAsync(newPayload);
-
-    // generate replacement refresh token
-    const new_refresh_token = await this.jwtService.signAsync(
-      { sub: user.id },
-      {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ??
-          '7d') as JwtSignOptions['expiresIn'],
-        jwtid: crypto.randomUUID(),
-      },
-    );
-
-    // compute hash of replacement refresh token
-    const newTokenHash =
-      this.refreshTokenHashingService.hash(new_refresh_token);
-
-    const expiresInDays = 7;
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + expiresInDays);
-
-    // Atomically mark old refresh token as revoked and persist replacement token within the same family
-    const rotated = await this.refreshTokenRepository.rotate(tokenHash, {
-      token: newTokenHash,
-      userId: user.id,
-      expiresAt,
-      familyId: savedToken.familyId,
+    // 6. Issue replacement access token through ITokenService
+    const access_token = await this.tokenService.issueAccessToken({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
     });
 
+    // 7. Issue replacement refresh token through ITokenService
+    const refreshTokenResult = await this.tokenService.issueRefreshToken({
+      sub: user.id,
+    });
+
+    // 8. Compute hash of replacement refresh token
+    const newTokenHash = this.refreshTokenHashingService.hash(
+      refreshTokenResult.token,
+    );
+
+    // 9. Atomically mark old refresh token as revoked (ROTATED) and persist replacement token within the same session
+    const rotated = await this.refreshTokenRepository.rotate(
+      tokenHash,
+      {
+        tokenHash: newTokenHash,
+        userId: user.id,
+        expiresAt: refreshTokenResult.expiresAt,
+        sessionId: savedToken.sessionId,
+      },
+      'ROTATED',
+    );
+
+    // 10. If rotation fails because the old token was already consumed (concurrent race), revoke compromised session
     if (!rotated) {
-      await this.refreshTokenRepository.revokeFamily(savedToken.familyId);
+      await this.refreshTokenRepository.revokeSession(
+        savedToken.sessionId,
+        'REUSE_DETECTED',
+      );
       throw new UnauthorizedException('Invalid or revoked refresh token');
     }
 
     return {
       access_token,
-      refresh_token: new_refresh_token,
+      refresh_token: refreshTokenResult.token,
     };
   }
 }

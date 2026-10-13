@@ -6,6 +6,7 @@ import {
 import * as bcrypt from 'bcrypt';
 import { ChangePasswordUseCase } from './change-password.use-case';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
+import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { UserEntities, Role } from '../../../../domain/entities/user.entities';
 import { ChangePasswordInputDto } from '../../../dto/auth/change-password-input.dto';
 
@@ -14,6 +15,7 @@ jest.mock('bcrypt');
 describe('ChangePasswordUseCase', () => {
   let useCase: ChangePasswordUseCase;
   let userRepository: jest.Mocked<IUserRepository>;
+  let refreshTokenRepository: jest.Mocked<IRefreshTokenRepository>;
 
   const initialHashedPassword =
     '$2b$10$abcdefghijklmnopqrstuuABCDEFGHIJKLMNOPQRSTUVWXYZ12';
@@ -42,7 +44,19 @@ describe('ChangePasswordUseCase', () => {
       updatePassword: jest.fn(),
     } as unknown as jest.Mocked<IUserRepository>;
 
-    useCase = new ChangePasswordUseCase(userRepository);
+    refreshTokenRepository = {
+      revokeAllForUser: jest.fn().mockResolvedValue(undefined),
+      findByTokenHash: jest.fn(),
+      deleteByTokenHash: jest.fn(),
+      rotate: jest.fn(),
+      revokeSession: jest.fn(),
+      create: jest.fn(),
+      delete: jest.fn(),
+      update: jest.fn(),
+      findById: jest.fn(),
+    } as unknown as jest.Mocked<IRefreshTokenRepository>;
+
+    useCase = new ChangePasswordUseCase(userRepository, refreshTokenRepository);
   });
 
   it('should throw NotFoundException when user does not exist', async () => {
@@ -60,6 +74,7 @@ describe('ChangePasswordUseCase', () => {
       'User not found',
     );
     expect(userRepository.updatePassword).not.toHaveBeenCalled();
+    expect(refreshTokenRepository.revokeAllForUser).not.toHaveBeenCalled();
   });
 
   it('should throw UnauthorizedException when user account is inactive or blocked', async () => {
@@ -81,6 +96,7 @@ describe('ChangePasswordUseCase', () => {
       'User account is inactive or blocked',
     );
     expect(userRepository.updatePassword).not.toHaveBeenCalled();
+    expect(refreshTokenRepository.revokeAllForUser).not.toHaveBeenCalled();
   });
 
   it('should throw BadRequestException when currentPassword is missing or not a string', async () => {
@@ -98,6 +114,7 @@ describe('ChangePasswordUseCase', () => {
       'Current password is required',
     );
     expect(userRepository.updatePassword).not.toHaveBeenCalled();
+    expect(refreshTokenRepository.revokeAllForUser).not.toHaveBeenCalled();
   });
 
   it('should throw BadRequestException when newPassword is shorter than 8 characters', async () => {
@@ -115,9 +132,10 @@ describe('ChangePasswordUseCase', () => {
       'Password must be at least 8 characters long',
     );
     expect(userRepository.updatePassword).not.toHaveBeenCalled();
+    expect(refreshTokenRepository.revokeAllForUser).not.toHaveBeenCalled();
   });
 
-  it('should throw BadRequestException when current password does not match stored hash', async () => {
+  it('should throw BadRequestException when current password does not match stored hash and NOT revoke sessions', async () => {
     userRepository.findById.mockResolvedValue(mockUser);
     (bcrypt.compare as jest.Mock).mockResolvedValue(false);
 
@@ -137,9 +155,10 @@ describe('ChangePasswordUseCase', () => {
       mockUser.passWordHash,
     );
     expect(userRepository.updatePassword).not.toHaveBeenCalled();
+    expect(refreshTokenRepository.revokeAllForUser).not.toHaveBeenCalled();
   });
 
-  it('should successfully change password when current password is correct', async () => {
+  it('should successfully change password and revoke all refresh-token sessions with PASSWORD_CHANGED reason', async () => {
     userRepository.findById.mockResolvedValue(mockUser);
     userRepository.updatePassword.mockResolvedValue(undefined);
     (bcrypt.compare as jest.Mock).mockResolvedValue(true);
@@ -164,9 +183,44 @@ describe('ChangePasswordUseCase', () => {
       'user-uuid-1',
       '$2b$10$newlyHashedPasswordString99',
     );
+    expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledTimes(1);
+    expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
+      'user-uuid-1',
+      'PASSWORD_CHANGED',
+    );
     expect(result).toEqual({
       message: 'Password changed successfully',
     });
+  });
+
+  it('should propagate revocation failure if revokeAllForUser fails after password update', async () => {
+    userRepository.findById.mockResolvedValue(mockUser);
+    userRepository.updatePassword.mockResolvedValue(undefined);
+    (bcrypt.compare as jest.Mock).mockResolvedValue(true);
+    (bcrypt.hash as jest.Mock).mockResolvedValue('$2b$10$newlyHashedPassword');
+
+    const revocationError = new Error(
+      'Database connection severed during session revocation',
+    );
+    refreshTokenRepository.revokeAllForUser.mockRejectedValue(revocationError);
+
+    const input: ChangePasswordInputDto = {
+      currentPassword: 'CorrectPassword123!',
+      newPassword: 'NewSecurePassword456!',
+    };
+
+    await expect(useCase.execute('user-uuid-1', input)).rejects.toThrow(
+      'Database connection severed during session revocation',
+    );
+
+    expect(userRepository.updatePassword).toHaveBeenCalledWith(
+      'user-uuid-1',
+      '$2b$10$newlyHashedPassword',
+    );
+    expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
+      'user-uuid-1',
+      'PASSWORD_CHANGED',
+    );
   });
 
   it('should never expose or return password hashes in the response', async () => {
@@ -212,6 +266,10 @@ describe('ChangePasswordUseCase', () => {
     expect(userRepository.updatePassword).toHaveBeenCalledWith(
       'authenticated-param-user-id',
       '$2b$10$hashedPassword',
+    );
+    expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
+      'authenticated-param-user-id',
+      'PASSWORD_CHANGED',
     );
   });
 });

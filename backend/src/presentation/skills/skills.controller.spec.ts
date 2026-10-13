@@ -7,8 +7,8 @@ import {
   ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { ITokenService } from '../../domain/services/token.service.interface';
 import { SkillsController } from './skills.controller';
 import { IGetSkillsCatalogUseCase } from '../../application/use-cases/worker-profile/interface/get-skills-catalog.use-case.interface';
 import { IGetWorkerSkillsUseCase } from '../../application/use-cases/worker-profile/interface/get-worker-skills.use-case.interface';
@@ -21,6 +21,7 @@ import { Role } from '../../domain/enums/role.enum';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
+import { AuthCookieService } from '../auth/services/auth-cookie.service';
 
 describe('SkillsController', () => {
   let controller: SkillsController;
@@ -91,13 +92,19 @@ describe('SkillsController', () => {
           useValue: { findById: jest.fn(), findByEmail: jest.fn() },
         },
         {
-          provide: JwtService,
-          useValue: { verifyAsync: jest.fn() },
+          provide: ITokenService,
+          useValue: {
+            verifyAccessToken: jest.fn(),
+            verifyRefreshToken: jest.fn(),
+            issueAccessToken: jest.fn(),
+            issueRefreshToken: jest.fn(),
+          },
         },
         {
           provide: ConfigService,
           useValue: { get: jest.fn() },
         },
+        AuthCookieService,
         Reflector,
       ],
     }).compile();

@@ -50,10 +50,9 @@ describe('DeactivateAdminUserUseCase', () => {
       update: jest.fn(),
       delete: jest.fn(),
       findByTokenHash: jest.fn(),
-      findByToken: jest.fn(),
       deleteByTokenHash: jest.fn(),
       rotate: jest.fn(),
-      revokeFamily: jest.fn(),
+      revokeSession: jest.fn().mockResolvedValue(undefined),
       revokeAllForUser: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -85,6 +84,7 @@ describe('DeactivateAdminUserUseCase', () => {
       });
       expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
         targetUserId,
+        'ADMIN_REVOKED',
       );
       expect(userRepository.delete).not.toHaveBeenCalled();
       expect(result).toBeInstanceOf(AdminUserResponseDto);
@@ -114,6 +114,7 @@ describe('DeactivateAdminUserUseCase', () => {
       });
       expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
         targetUserId,
+        'ADMIN_REVOKED',
       );
       expect(result.role).toBe(Role.RECRUITER);
       expect(result.isActive).toBe(false);
@@ -142,6 +143,7 @@ describe('DeactivateAdminUserUseCase', () => {
       });
       expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
         anotherAdminId,
+        'ADMIN_REVOKED',
       );
       expect(result.id).toBe(anotherAdminId);
       expect(result.role).toBe(Role.ADMIN);

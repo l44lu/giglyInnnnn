@@ -63,7 +63,10 @@ export class ResetPasswordUseCase implements IResetPasswordUseCase {
     );
 
     // 7. Revoke all active refresh-token sessions across all devices for this user
-    await this.refreshTokenRepository.revokeAllForUser(resetRecord.userId);
+    await this.refreshTokenRepository.revokeAllForUser(
+      resetRecord.userId,
+      'PASSWORD_RESET',
+    );
 
     // 8. Consume authorization token: permanently delete reset record (single-use)
     await this.passwordResetRepository.delete(resetRecord.id);

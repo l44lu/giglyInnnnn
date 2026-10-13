@@ -50,10 +50,9 @@ describe('SetAdminUserBlockStatusUseCase', () => {
       update: jest.fn(),
       delete: jest.fn(),
       findByTokenHash: jest.fn(),
-      findByToken: jest.fn(),
       deleteByTokenHash: jest.fn(),
       rotate: jest.fn(),
-      revokeFamily: jest.fn(),
+      revokeSession: jest.fn().mockResolvedValue(undefined),
       revokeAllForUser: jest.fn().mockResolvedValue(undefined),
     };
 
@@ -85,6 +84,7 @@ describe('SetAdminUserBlockStatusUseCase', () => {
       });
       expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
         targetUserId,
+        'ADMIN_REVOKED',
       );
       expect(result).toBeInstanceOf(AdminUserResponseDto);
       expect(result.id).toBe(targetUserId);
@@ -113,6 +113,7 @@ describe('SetAdminUserBlockStatusUseCase', () => {
       });
       expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
         targetUserId,
+        'ADMIN_REVOKED',
       );
       expect(result.role).toBe(Role.RECRUITER);
       expect(result.isBlocked).toBe(true);
@@ -145,6 +146,7 @@ describe('SetAdminUserBlockStatusUseCase', () => {
       });
       expect(refreshTokenRepository.revokeAllForUser).toHaveBeenCalledWith(
         anotherAdminId,
+        'ADMIN_REVOKED',
       );
       expect(result.id).toBe(anotherAdminId);
       expect(result.role).toBe(Role.ADMIN);

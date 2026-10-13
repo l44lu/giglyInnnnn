@@ -110,9 +110,15 @@ describe('Admin User Block/Unblock PATCH /admin/users/:userId/block (e2e)', () =
       });
     }
 
-    const foundAdmin = allUsers.find((u) => u.role.code === Role.ADMIN);
-    const foundWorker = allUsers.find((u) => u.role.code === Role.WORKER);
-    const foundRecruiter = allUsers.find((u) => u.role.code === Role.RECRUITER);
+    const foundAdmin = allUsers.find(
+      (u) => u.role.code === Role.ADMIN && u.isActive && !u.isBlocked,
+    );
+    const foundWorker = allUsers.find(
+      (u) => u.role.code === Role.WORKER && u.isActive && !u.isBlocked,
+    );
+    const foundRecruiter = allUsers.find(
+      (u) => u.role.code === Role.RECRUITER && u.isActive && !u.isBlocked,
+    );
 
     expect(foundAdmin).toBeDefined();
     expect(foundWorker).toBeDefined();
@@ -323,13 +329,13 @@ describe('Admin User Block/Unblock PATCH /admin/users/:userId/block (e2e)', () =
         .createHash('sha256')
         .update(rawRefreshToken)
         .digest('hex');
-      const familyId = crypto.randomUUID();
+      const sessionId = crypto.randomUUID();
 
       await prismaService.refreshToken.create({
         data: {
-          token: tokenHash,
+          tokenHash,
           userId: targetId,
-          familyId,
+          sessionId,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           revokedAt: null,
         },

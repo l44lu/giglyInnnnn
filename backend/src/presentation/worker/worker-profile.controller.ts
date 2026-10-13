@@ -17,6 +17,7 @@ import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
 import { CurrentUser } from '../decorators/current-user.decorator';
+import { BypassResponseWrapper } from '../decorators/bypass-response-wrapper.decorator';
 import { Role } from '../../domain/enums/role.enum';
 import { IGetWorkerProfileUseCase } from '../../application/use-cases/worker-profile/interface/get-worker-profile.use-case.interface';
 import { IUpdateWorkerProfileUseCase } from '../../application/use-cases/worker-profile/interface/update-worker-profile.use-case.interface';
@@ -113,6 +114,7 @@ export class WorkerProfileController {
   @Get('profile/avatar')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.WORKER)
+  @BypassResponseWrapper()
   async getAvatar(
     @CurrentUser('id') userId: string,
     @Res() res: Response,

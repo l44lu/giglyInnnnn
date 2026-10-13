@@ -52,7 +52,7 @@ export class DeactivateAdminUserUseCase implements IDeactivateAdminUserUseCase {
     });
 
     // 6. Revoke all active refresh sessions across all devices for the deactivated user
-    await this.refreshTokenRepository.revokeAllForUser(userId);
+    await this.refreshTokenRepository.revokeAllForUser(userId, 'ADMIN_REVOKED');
 
     // 7. Return safe AdminUserResponseDto
     return AdminUserMapper.toResponseDto(updatedUser);

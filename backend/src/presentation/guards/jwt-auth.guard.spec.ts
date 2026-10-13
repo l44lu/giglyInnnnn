@@ -1,16 +1,23 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { JwtAuthGuard } from './jwt-auth.guard';
 import { IUserRepository } from '../../domain/repositories/user.repository.interface';
 import { UserEntities } from '../../domain/entities/user.entities';
 import { Role } from '../../domain/enums/role.enum';
+import {
+  ITokenService,
+  InvalidTokenError,
+  TokenExpiredError,
+  AccessTokenPayload,
+} from '../../domain/services/token.service.interface';
+import { AuthCookieService } from '../auth/services/auth-cookie.service';
 
 describe('JwtAuthGuard', () => {
   let guard: JwtAuthGuard;
-  let jwtService: jest.Mocked<JwtService>;
-  let configService: jest.Mocked<ConfigService>;
+  let tokenService: jest.Mocked<ITokenService>;
   let userRepository: jest.Mocked<IUserRepository>;
+  let authCookieService: AuthCookieService;
+  let configService: jest.Mocked<ConfigService>;
 
   const mockExecutionContext = (
     authHeader?: string,
@@ -51,10 +58,19 @@ describe('JwtAuthGuard', () => {
       ...overrides,
     });
 
+  const mockPayload: AccessTokenPayload = {
+    sub: 'user-uuid-123',
+    email: 'alex@example.com',
+    role: Role.WORKER,
+  };
+
   beforeEach(() => {
-    jwtService = {
-      verifyAsync: jest.fn(),
-    } as unknown as jest.Mocked<JwtService>;
+    tokenService = {
+      verifyAccessToken: jest.fn().mockResolvedValue(mockPayload),
+      verifyRefreshToken: jest.fn(),
+      issueAccessToken: jest.fn(),
+      issueRefreshToken: jest.fn(),
+    } as unknown as jest.Mocked<ITokenService>;
 
     configService = {
       get: jest.fn().mockImplementation((key: string) => {
@@ -73,11 +89,31 @@ describe('JwtAuthGuard', () => {
       updatePassword: jest.fn(),
     };
 
-    guard = new JwtAuthGuard(jwtService, configService, userRepository);
+    authCookieService = new AuthCookieService(configService);
+    guard = new JwtAuthGuard(tokenService, userRepository, authCookieService);
   });
 
   it('should be defined', () => {
     expect(guard).toBeDefined();
+  });
+
+  it('should delegate access token extraction to AuthCookieService', async () => {
+    const mockAuthCookieService = {
+      getAccessToken: jest.fn().mockReturnValue('valid.jwt.token'),
+    } as unknown as AuthCookieService;
+
+    const testGuard = new JwtAuthGuard(
+      tokenService,
+      userRepository,
+      mockAuthCookieService,
+    );
+    const context = mockExecutionContext(undefined, {
+      access_token: 'valid.jwt.token',
+    });
+
+    const result = await testGuard.canActivate(context);
+    expect(result).toBe(true);
+    expect(mockAuthCookieService.getAccessToken).toHaveBeenCalledTimes(1);
   });
 
   it('should throw UnauthorizedException if access_token cookie is missing', async () => {
@@ -96,14 +132,42 @@ describe('JwtAuthGuard', () => {
     );
   });
 
-  it('should throw UnauthorizedException if token verification fails', async () => {
+  it('should throw UnauthorizedException if token verification fails with InvalidTokenError', async () => {
     const context = mockExecutionContext(undefined, {
       access_token: 'invalid.jwt.token',
     });
-    jwtService.verifyAsync.mockRejectedValue(new Error('Invalid token'));
+    tokenService.verifyAccessToken.mockRejectedValue(
+      new InvalidTokenError('Invalid token signature'),
+    );
 
     await expect(guard.canActivate(context)).rejects.toThrow(
       new UnauthorizedException('Invalid or expired token'),
+    );
+  });
+
+  it('should throw UnauthorizedException if token verification fails with TokenExpiredError', async () => {
+    const context = mockExecutionContext(undefined, {
+      access_token: 'expired.jwt.token',
+    });
+    tokenService.verifyAccessToken.mockRejectedValue(
+      new TokenExpiredError('Token has expired'),
+    );
+
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      new UnauthorizedException('Invalid or expired token'),
+    );
+  });
+
+  it('should propagate unexpected infrastructure errors without converting to 401', async () => {
+    const context = mockExecutionContext(undefined, {
+      access_token: 'valid.jwt.token',
+    });
+    tokenService.verifyAccessToken.mockRejectedValue(
+      new Error('Internal keystore uncontactable'),
+    );
+
+    await expect(guard.canActivate(context)).rejects.toThrow(
+      'Internal keystore uncontactable',
     );
   });
 
@@ -111,13 +175,8 @@ describe('JwtAuthGuard', () => {
     const context = mockExecutionContext(undefined, {
       access_token: 'valid.jwt.token',
     });
-    const mockPayload = {
-      sub: 'user-uuid-123',
-      email: 'alex@example.com',
-      role: 'WORKER' as const,
-    };
 
-    jwtService.verifyAsync.mockResolvedValue(mockPayload);
+    tokenService.verifyAccessToken.mockResolvedValue(mockPayload);
     userRepository.findById.mockResolvedValue(
       createMockUser({ id: 'user-uuid-123', role: Role.WORKER }),
     );
@@ -132,26 +191,39 @@ describe('JwtAuthGuard', () => {
       role: 'WORKER',
     });
 
-    expect(jwtService.verifyAsync).toHaveBeenCalledWith('valid.jwt.token', {
-      secret: 'test-jwt-secret',
-      algorithms: ['HS256'],
-      issuer: 'gigly-auth',
-      audience: 'gigly-app',
-    });
+    expect(tokenService.verifyAccessToken).toHaveBeenCalledWith(
+      'valid.jwt.token',
+    );
     expect(userRepository.findById).toHaveBeenCalledWith('user-uuid-123');
+  });
+
+  it('should use live database role for request.user instead of trusting JWT payload claim alone', async () => {
+    const context = mockExecutionContext(undefined, {
+      access_token: 'valid.jwt.token',
+    });
+
+    // JWT claim says WORKER, but database user has been promoted to ADMIN
+    tokenService.verifyAccessToken.mockResolvedValue({
+      ...mockPayload,
+      role: Role.WORKER,
+    });
+    userRepository.findById.mockResolvedValue(
+      createMockUser({ id: 'user-uuid-123', role: Role.ADMIN }),
+    );
+
+    const result = await guard.canActivate(context);
+    const request = context.switchToHttp().getRequest();
+
+    expect(result).toBe(true);
+    expect(request.user.role).toBe(Role.ADMIN);
   });
 
   describe('Step 9.4: Account Status Enforcement Invariants', () => {
     const validCookie = { access_token: 'valid.jwt.token' };
-    const mockPayload = {
-      sub: 'user-uuid-123',
-      email: 'alex@example.com',
-      role: 'WORKER' as const,
-    };
 
     it('DENIES access (401) when user does not exist in database despite cryptographically valid JWT', async () => {
       const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockResolvedValue(mockPayload);
+      tokenService.verifyAccessToken.mockResolvedValue(mockPayload);
       userRepository.findById.mockResolvedValue(null);
 
       await expect(guard.canActivate(context)).rejects.toThrow(
@@ -161,7 +233,7 @@ describe('JwtAuthGuard', () => {
 
     it('DENIES access (401) when user is BLOCKED (isBlocked === true) even with valid unexpired JWT', async () => {
       const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockResolvedValue(mockPayload);
+      tokenService.verifyAccessToken.mockResolvedValue(mockPayload);
       userRepository.findById.mockResolvedValue(
         createMockUser({ isActive: true, isBlocked: true }),
       );
@@ -173,7 +245,7 @@ describe('JwtAuthGuard', () => {
 
     it('DENIES access (401) when user is INACTIVE (isActive === false) even with valid unexpired JWT', async () => {
       const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockResolvedValue(mockPayload);
+      tokenService.verifyAccessToken.mockResolvedValue(mockPayload);
       userRepository.findById.mockResolvedValue(
         createMockUser({ isActive: false, isBlocked: false }),
       );
@@ -185,7 +257,7 @@ describe('JwtAuthGuard', () => {
 
     it('DENIES access (401) when user is both INACTIVE and BLOCKED', async () => {
       const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockResolvedValue(mockPayload);
+      tokenService.verifyAccessToken.mockResolvedValue(mockPayload);
       userRepository.findById.mockResolvedValue(
         createMockUser({ isActive: false, isBlocked: true }),
       );
@@ -196,17 +268,14 @@ describe('JwtAuthGuard', () => {
     });
   });
 
-  describe('Step 9.6: JWT Verification Hardening (Algorithm Pinning, Issuer, Audience)', () => {
+  describe('Step 9.6: JWT Verification Hardening via ITokenService', () => {
     const validCookie = { access_token: 'valid.jwt.token' };
-    const mockPayload = {
-      sub: 'user-uuid-123',
-      email: 'alex@example.com',
-      role: 'WORKER' as const,
-    };
 
-    it('DENIES access (401) when token algorithm is invalid or unsupported (e.g. none or RS256)', async () => {
+    it('DENIES access (401) when token algorithm is invalid or unsupported', async () => {
       const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockRejectedValue(new Error('invalid algorithm'));
+      tokenService.verifyAccessToken.mockRejectedValue(
+        new InvalidTokenError('invalid algorithm: none'),
+      );
 
       await expect(guard.canActivate(context)).rejects.toThrow(
         new UnauthorizedException('Invalid or expired token'),
@@ -215,8 +284,8 @@ describe('JwtAuthGuard', () => {
 
     it('DENIES access (401) when token issuer is invalid / mismatched', async () => {
       const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockRejectedValue(
-        new Error('jwt issuer invalid. expected: gigly-auth'),
+      tokenService.verifyAccessToken.mockRejectedValue(
+        new InvalidTokenError('jwt issuer invalid. expected: gigly-auth'),
       );
 
       await expect(guard.canActivate(context)).rejects.toThrow(
@@ -226,51 +295,22 @@ describe('JwtAuthGuard', () => {
 
     it('DENIES access (401) when token audience is invalid / mismatched', async () => {
       const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockRejectedValue(
-        new Error('jwt audience invalid. expected: gigly-app'),
+      tokenService.verifyAccessToken.mockRejectedValue(
+        new InvalidTokenError('jwt audience invalid. expected: gigly-app'),
       );
 
       await expect(guard.canActivate(context)).rejects.toThrow(
         new UnauthorizedException('Invalid or expired token'),
       );
     });
-
-    it('ALLOWS access when custom JWT_ISSUER and JWT_AUDIENCE are configured', async () => {
-      configService.get.mockImplementation((key: string) => {
-        if (key === 'JWT_SECRET') return 'custom-secret';
-        if (key === 'JWT_ISSUER') return 'custom-issuer';
-        if (key === 'JWT_AUDIENCE') return 'custom-audience';
-        return undefined;
-      });
-
-      const context = mockExecutionContext(undefined, validCookie);
-      jwtService.verifyAsync.mockResolvedValue(mockPayload);
-      userRepository.findById.mockResolvedValue(createMockUser());
-
-      const result = await guard.canActivate(context);
-      expect(result).toBe(true);
-
-      expect(jwtService.verifyAsync).toHaveBeenCalledWith('valid.jwt.token', {
-        secret: 'custom-secret',
-        algorithms: ['HS256'],
-        issuer: 'custom-issuer',
-        audience: 'custom-audience',
-      });
-    });
   });
 
   describe('Step 2: Cookie Authentication and Bearer Fallback', () => {
-    const mockPayload = {
-      sub: 'user-uuid-123',
-      email: 'alex@example.com',
-      role: 'WORKER' as const,
-    };
-
     it('authenticates successfully with valid access_token cookie without Authorization header', async () => {
       const context = mockExecutionContext(undefined, {
         access_token: 'valid.cookie.token',
       });
-      jwtService.verifyAsync.mockResolvedValue(mockPayload);
+      tokenService.verifyAccessToken.mockResolvedValue(mockPayload);
       userRepository.findById.mockResolvedValue(createMockUser());
 
       const result = await guard.canActivate(context);
@@ -282,14 +322,8 @@ describe('JwtAuthGuard', () => {
         email: 'alex@example.com',
         role: 'WORKER',
       });
-      expect(jwtService.verifyAsync).toHaveBeenCalledWith(
+      expect(tokenService.verifyAccessToken).toHaveBeenCalledWith(
         'valid.cookie.token',
-        expect.objectContaining({
-          secret: 'test-jwt-secret',
-          algorithms: ['HS256'],
-          issuer: 'gigly-auth',
-          audience: 'gigly-app',
-        }),
       );
     });
 
@@ -297,14 +331,13 @@ describe('JwtAuthGuard', () => {
       const context = mockExecutionContext('Bearer header.token', {
         access_token: 'cookie.token',
       });
-      jwtService.verifyAsync.mockResolvedValue(mockPayload);
+      tokenService.verifyAccessToken.mockResolvedValue(mockPayload);
       userRepository.findById.mockResolvedValue(createMockUser());
 
       const result = await guard.canActivate(context);
       expect(result).toBe(true);
-      expect(jwtService.verifyAsync).toHaveBeenCalledWith(
+      expect(tokenService.verifyAccessToken).toHaveBeenCalledWith(
         'cookie.token',
-        expect.anything(),
       );
     });
 
@@ -328,7 +361,9 @@ describe('JwtAuthGuard', () => {
       const context = mockExecutionContext(undefined, {
         access_token: 'invalid.cookie.token',
       });
-      jwtService.verifyAsync.mockRejectedValue(new Error('invalid signature'));
+      tokenService.verifyAccessToken.mockRejectedValue(
+        new InvalidTokenError('invalid signature'),
+      );
 
       await expect(guard.canActivate(context)).rejects.toThrow(
         new UnauthorizedException('Invalid or expired token'),
@@ -339,7 +374,9 @@ describe('JwtAuthGuard', () => {
       const context = mockExecutionContext(undefined, {
         access_token: 'expired.cookie.token',
       });
-      jwtService.verifyAsync.mockRejectedValue(new Error('jwt expired'));
+      tokenService.verifyAccessToken.mockRejectedValue(
+        new TokenExpiredError('jwt expired'),
+      );
 
       await expect(guard.canActivate(context)).rejects.toThrow(
         new UnauthorizedException('Invalid or expired token'),
@@ -350,7 +387,9 @@ describe('JwtAuthGuard', () => {
       const context = mockExecutionContext(undefined, {
         access_token: 'tampered.token.data',
       });
-      jwtService.verifyAsync.mockRejectedValue(new Error('jwt malformed'));
+      tokenService.verifyAccessToken.mockRejectedValue(
+        new InvalidTokenError('jwt malformed'),
+      );
 
       await expect(guard.canActivate(context)).rejects.toThrow(
         new UnauthorizedException('Invalid or expired token'),

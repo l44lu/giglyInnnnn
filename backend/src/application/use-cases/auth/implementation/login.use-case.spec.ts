@@ -1,11 +1,10 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { LoginUseCase } from './login.use-case';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
 import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { IRefreshTokenHashingService } from '../../../../domain/services/refresh-token-hashing.service.interface';
+import { ITokenService } from '../../../../domain/services/token.service.interface';
 import { RefreshTokenHashingService } from '../../../../infrastructure/crypto/refresh-token-hashing.service';
 import { UserEntities } from '../../../../domain/entities/user.entities';
 import { Role } from '../../../../domain/enums/role.enum';
@@ -16,8 +15,7 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
   let userRepository: jest.Mocked<IUserRepository>;
   let refreshTokenRepository: jest.Mocked<IRefreshTokenRepository>;
   let refreshTokenHashingService: IRefreshTokenHashingService;
-  let jwtService: jest.Mocked<JwtService>;
-  let configService: jest.Mocked<ConfigService>;
+  let tokenService: jest.Mocked<ITokenService>;
 
   const mockUser = new UserEntities({
     id: 'user-uuid-123',
@@ -33,6 +31,7 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access.payload.mock';
   const rawRefreshJwt =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh.payload.mock';
+  const mockTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   beforeEach(async () => {
     mockUser.passWordHash = await bcrypt.hash('CorrectPassword123!', 10);
@@ -46,7 +45,6 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
     } as unknown as jest.Mocked<IUserRepository>;
 
     refreshTokenRepository = {
-      findByToken: jest.fn(),
       findByTokenHash: jest.fn(),
       create: jest.fn(),
       delete: jest.fn(),
@@ -56,30 +54,21 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
 
     refreshTokenHashingService = new RefreshTokenHashingService();
 
-    jwtService = {
-      signAsync: jest.fn().mockImplementation((payload, options) => {
-        if (options && options.secret === 'test-refresh-secret') {
-          return Promise.resolve(rawRefreshJwt);
-        }
-        return Promise.resolve(rawAccessJwt);
+    tokenService = {
+      issueAccessToken: jest.fn().mockResolvedValue(rawAccessJwt),
+      issueRefreshToken: jest.fn().mockResolvedValue({
+        token: rawRefreshJwt,
+        expiresAt: mockTokenExpiry,
       }),
-      verifyAsync: jest.fn(),
-    } as unknown as jest.Mocked<JwtService>;
-
-    configService = {
-      get: jest.fn((key: string) => {
-        if (key === 'JWT_REFRESH_SECRET') return 'test-refresh-secret';
-        if (key === 'JWT_REFRESH_EXPIRES_IN') return '7d';
-        return null;
-      }),
-    } as unknown as jest.Mocked<ConfigService>;
+      verifyAccessToken: jest.fn(),
+      verifyRefreshToken: jest.fn(),
+    } as unknown as jest.Mocked<ITokenService>;
 
     useCase = new LoginUseCase(
       userRepository,
       refreshTokenRepository,
       refreshTokenHashingService,
-      jwtService,
-      configService,
+      tokenService,
     );
   });
 
@@ -194,7 +183,7 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
         return Promise.resolve(
           new RefreshTokenEntity({
             id: 'token-row-id-1',
-            token: data.token!,
+            tokenHash: data.tokenHash!,
             userId: data.userId!,
             expiresAt: data.expiresAt!,
             createdAt: new Date(),
@@ -213,11 +202,21 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
       expect(response.refresh_token).toMatch(/^eyJ/);
       expect(response.user.email).toBe('worker@gigly.com');
 
+      // Verify token service invocation
+      expect(tokenService.issueAccessToken).toHaveBeenCalledWith({
+        sub: 'user-uuid-123',
+        email: 'worker@gigly.com',
+        role: Role.WORKER,
+      });
+      expect(tokenService.issueRefreshToken).toHaveBeenCalledWith({
+        sub: 'user-uuid-123',
+      });
+
       // 2. Repository create was called exactly once
       expect(refreshTokenRepository.create).toHaveBeenCalledTimes(1);
 
       const createArg = refreshTokenRepository.create.mock.calls[0][0];
-      const storedToken = createArg.token as string;
+      const storedToken = createArg.tokenHash as string;
 
       // 3. The value passed to repository is NOT the raw refresh JWT
       expect(storedToken).not.toBe(rawRefreshJwt);
@@ -231,21 +230,19 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
       const expectedHash = refreshTokenHashingService.hash(rawRefreshJwt);
       expect(storedToken).toBe(expectedHash);
 
-      // 6. User ID and expiration date are properly saved
+      // 6. User ID and expiration date from token service are properly saved
       expect(createArg.userId).toBe('user-uuid-123');
-      expect(createArg.expiresAt).toBeInstanceOf(Date);
-      expect((createArg.expiresAt as Date).getTime()).toBeGreaterThan(
-        Date.now(),
-      );
+      expect(createArg.expiresAt).toBe(mockTokenExpiry);
 
-      // 7. Token Family ID is generated as a secure UUID (9C-4)
-      expect(createArg.familyId).toBeDefined();
-      expect(createArg.familyId).toMatch(
+      // 7. Token Session ID is generated as a secure UUID (9C-4)
+      const sessionId = createArg.sessionId;
+      expect(sessionId).toBeDefined();
+      expect(sessionId).toMatch(
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
       );
     });
 
-    it('TEST 13: each new login generates a unique and independent token family (F2 !== F1)', async () => {
+    it('TEST 13: each new login generates a unique and independent token session (S2 !== S1)', async () => {
       userRepository.findByEmail.mockResolvedValue(mockUser);
       refreshTokenRepository.create.mockResolvedValue(
         new RefreshTokenEntity({ id: 'tok-1' }),
@@ -261,14 +258,14 @@ describe('LoginUseCase — Refresh Token Hashing At Rest', () => {
       });
 
       expect(refreshTokenRepository.create).toHaveBeenCalledTimes(2);
-      const firstFamilyId =
-        refreshTokenRepository.create.mock.calls[0][0].familyId;
-      const secondFamilyId =
-        refreshTokenRepository.create.mock.calls[1][0].familyId;
+      const firstSessionId =
+        refreshTokenRepository.create.mock.calls[0][0].sessionId;
+      const secondSessionId =
+        refreshTokenRepository.create.mock.calls[1][0].sessionId;
 
-      expect(firstFamilyId).toBeDefined();
-      expect(secondFamilyId).toBeDefined();
-      expect(firstFamilyId).not.toBe(secondFamilyId);
+      expect(firstSessionId).toBeDefined();
+      expect(secondSessionId).toBeDefined();
+      expect(firstSessionId).not.toBe(secondSessionId);
     });
   });
 });

@@ -1,4 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
+import { isApiResponse } from "../types/api.ts";
 
 export const baseURL: string =
   typeof import.meta !== "undefined" &&
@@ -103,9 +104,23 @@ export const getRefreshedToken = async (): Promise<void> => {
   return refreshPromise;
 };
 
-// Response interceptor: handle 401 and perform single-flight retry
+// Response interceptor: unwraps common ApiResponse envelope and handles 401 retry
 api.interceptors.response.use(
-  (response) => response,
+  (response) => {
+    const isBinary =
+      response.config.responseType === "blob" ||
+      response.config.responseType === "arraybuffer" ||
+      response.config.responseType === "stream" ||
+      (typeof Blob !== "undefined" && response.data instanceof Blob) ||
+      (typeof ArrayBuffer !== "undefined" &&
+        response.data instanceof ArrayBuffer);
+
+    if (!isBinary && isApiResponse(response.data)) {
+      response.data = response.data.data;
+    }
+
+    return response;
+  },
   async (error: unknown) => {
     if (!axios.isAxiosError(error) || !error.config) {
       return Promise.reject(
@@ -153,4 +168,5 @@ api.interceptors.response.use(
   },
 );
 
+export { isApiResponse };
 export default api;

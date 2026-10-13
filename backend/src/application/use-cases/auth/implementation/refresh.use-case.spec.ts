@@ -1,10 +1,12 @@
 import { UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { RefreshUseCase } from './refresh.use-case';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
 import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { IRefreshTokenHashingService } from '../../../../domain/services/refresh-token-hashing.service.interface';
+import {
+  ITokenService,
+  InvalidTokenError,
+} from '../../../../domain/services/token.service.interface';
 import { RefreshTokenHashingService } from '../../../../infrastructure/crypto/refresh-token-hashing.service';
 import { UserEntities } from '../../../../domain/entities/user.entities';
 import { Role } from '../../../../domain/enums/role.enum';
@@ -15,8 +17,7 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
   let userRepository: jest.Mocked<IUserRepository>;
   let refreshTokenRepository: jest.Mocked<IRefreshTokenRepository>;
   let refreshTokenHashingService: IRefreshTokenHashingService;
-  let jwtService: jest.Mocked<JwtService>;
-  let configService: jest.Mocked<ConfigService>;
+  let tokenService: jest.Mocked<ITokenService>;
 
   const rawRefreshJwtA =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.tokenA.refresh.mock';
@@ -24,6 +25,7 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.tokenB.rotated.refresh.mock';
   const newAccessJwt =
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.new.access.token.mock';
+  const mockTokenExpiry = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const mockUser = new UserEntities({
     id: 'user-uuid-123',
@@ -45,11 +47,11 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     } as unknown as jest.Mocked<IUserRepository>;
 
     refreshTokenRepository = {
-      findByToken: jest.fn(),
       findByTokenHash: jest.fn(),
       deleteByTokenHash: jest.fn().mockResolvedValue(true),
       rotate: jest.fn().mockResolvedValue(true),
-      revokeFamily: jest.fn().mockResolvedValue(undefined),
+      revokeSession: jest.fn().mockResolvedValue(undefined),
+      revokeAllForUser: jest.fn().mockResolvedValue(undefined),
       create: jest.fn(),
       delete: jest.fn(),
       update: jest.fn(),
@@ -58,30 +60,23 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
 
     refreshTokenHashingService = new RefreshTokenHashingService();
 
-    jwtService = {
-      verifyAsync: jest.fn(),
-      signAsync: jest.fn().mockImplementation((payload, options) => {
-        if (options && options.secret === 'test-refresh-secret') {
-          return Promise.resolve(rawRefreshJwtB);
-        }
-        return Promise.resolve(newAccessJwt);
+    tokenService = {
+      verifyRefreshToken: jest.fn().mockResolvedValue({
+        sub: 'user-uuid-123',
       }),
-    } as unknown as jest.Mocked<JwtService>;
-
-    configService = {
-      get: jest.fn((key: string) => {
-        if (key === 'JWT_REFRESH_SECRET') return 'test-refresh-secret';
-        if (key === 'JWT_REFRESH_EXPIRES_IN') return '7d';
-        return null;
+      issueAccessToken: jest.fn().mockResolvedValue(newAccessJwt),
+      issueRefreshToken: jest.fn().mockResolvedValue({
+        token: rawRefreshJwtB,
+        expiresAt: mockTokenExpiry,
       }),
-    } as unknown as jest.Mocked<ConfigService>;
+      verifyAccessToken: jest.fn(),
+    } as unknown as jest.Mocked<ITokenService>;
 
     useCase = new RefreshUseCase(
       userRepository,
       refreshTokenRepository,
       refreshTokenHashingService,
-      jwtService,
-      configService,
+      tokenService,
     );
   });
 
@@ -95,13 +90,13 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
         new UnauthorizedException('Refresh token is required'),
       );
 
-      expect(jwtService.verifyAsync).not.toHaveBeenCalled();
+      expect(tokenService.verifyRefreshToken).not.toHaveBeenCalled();
       expect(refreshTokenRepository.findByTokenHash).not.toHaveBeenCalled();
     });
 
     it('2 & 3. Invalid JWT / invalid signature → throws 401', async () => {
-      jwtService.verifyAsync.mockRejectedValue(
-        new Error('invalid signature error'),
+      tokenService.verifyRefreshToken.mockRejectedValue(
+        new InvalidTokenError('invalid signature error'),
       );
 
       await expect(
@@ -116,24 +111,28 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     it('4. Hash lookup is performed using the hashed incoming token', async () => {
       const expectedHash = refreshTokenHashingService.hash(rawRefreshJwtA);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: expectedHash,
+          tokenHash: expectedHash,
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
+          sessionId: 'session-uuid-1',
         }),
       );
       userRepository.findById.mockResolvedValue(mockUser);
       refreshTokenRepository.create.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-2',
-          token: refreshTokenHashingService.hash(rawRefreshJwtB),
+          tokenHash: refreshTokenHashingService.hash(rawRefreshJwtB),
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
+          sessionId: 'session-uuid-1',
         }),
       );
 
@@ -145,7 +144,9 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     });
 
     it('5. Token not found in DB → throws 401', async () => {
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(null);
 
       await expect(
@@ -161,14 +162,17 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     it('6. DB-expired token → throws 401', async () => {
       const expectedHash = refreshTokenHashingService.hash(rawRefreshJwtA);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: expectedHash,
+          tokenHash: expectedHash,
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() - 1000 * 60), // expired 1 minute ago
           createdAt: new Date(Date.now() - 1000 * 60 * 60 * 24 * 8),
+          sessionId: 'session-uuid-1',
         }),
       );
 
@@ -185,14 +189,17 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     it('7. User not found in DB → throws 401', async () => {
       const expectedHash = refreshTokenHashingService.hash(rawRefreshJwtA);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: expectedHash,
+          tokenHash: expectedHash,
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
+          sessionId: 'session-uuid-1',
         }),
       );
       userRepository.findById.mockResolvedValue(null);
@@ -211,15 +218,17 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
       const oldTokenHash = refreshTokenHashingService.hash(rawRefreshJwtA);
       const expectedNewHash = refreshTokenHashingService.hash(rawRefreshJwtB);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: oldTokenHash,
+          tokenHash: oldTokenHash,
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId: 'family-uuid-1',
+          sessionId: 'session-uuid-1',
           revokedAt: null,
         }),
       );
@@ -227,9 +236,11 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
       refreshTokenRepository.rotate.mockResolvedValue(true);
 
       // 8. Valid refresh succeeds
-      const result = await useCase.execute({ refresh_token: rawRefreshJwtA });
+      const result = await useCase.execute({
+        refresh_token: rawRefreshJwtA,
+      });
 
-      // 9. New access token is issued
+      // 9. New access token is returned
       expect(result.access_token).toBe(newAccessJwt);
 
       // 10. New refresh token is issued
@@ -243,24 +254,24 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
       const [calledOldHash, calledNewData] =
         refreshTokenRepository.rotate.mock.calls[0];
       expect(calledOldHash).toBe(oldTokenHash);
-      expect(calledNewData.token).toBe(expectedNewHash);
-      expect(calledNewData.token).toHaveLength(64);
-      expect(calledNewData.token).toMatch(/^[0-9a-f]{64}$/);
+      expect(calledNewData.tokenHash).toBe(expectedNewHash);
+      expect(calledNewData.tokenHash).toHaveLength(64);
+      expect(calledNewData.tokenHash).toMatch(/^[0-9a-f]{64}$/);
       expect(calledNewData.userId).toBe('user-uuid-123');
-      expect(calledNewData.expiresAt).toBeInstanceOf(Date);
-      // TEST 2: Rotation preserves the token family
-      expect(calledNewData.familyId).toBe('family-uuid-1');
+      expect(calledNewData.expiresAt).toBe(mockTokenExpiry);
+      // TEST 2: Rotation preserves the token session
+      expect(calledNewData.sessionId).toBe('session-uuid-1');
 
       // 13. Raw new refresh token is returned to caller
       expect(result.refresh_token).toBe(rawRefreshJwtB);
 
       // 16. Hash of new raw refresh token matches the persisted hash
       expect(refreshTokenHashingService.hash(result.refresh_token!)).toBe(
-        calledNewData.token,
+        calledNewData.tokenHash,
       );
 
       // 17. The response does NOT expose the hash
-      expect(result.refresh_token).not.toBe(calledNewData.token);
+      expect(result.refresh_token).not.toBe(calledNewData.tokenHash);
       expect(result.refresh_token!.startsWith('eyJ')).toBe(true);
       expect(result.refresh_token).not.toMatch(/^[0-9a-f]{64}$/);
     });
@@ -268,15 +279,17 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     it('rejects if old token was already consumed by a concurrent request', async () => {
       const oldTokenHash = refreshTokenHashingService.hash(rawRefreshJwtA);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: oldTokenHash,
+          tokenHash: oldTokenHash,
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId: 'family-uuid-1',
+          sessionId: 'session-uuid-1',
           revokedAt: null,
         }),
       );
@@ -291,51 +304,55 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledWith(
-        'family-uuid-1',
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledWith(
+        'session-uuid-1',
+        'REUSE_DETECTED',
       );
     });
 
     it('propagates unexpected database failure during rotation without converting to UnauthorizedException', async () => {
       const oldTokenHash = refreshTokenHashingService.hash(rawRefreshJwtA);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-1',
-          token: oldTokenHash,
+          tokenHash: oldTokenHash,
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId: 'family-uuid-1',
+          sessionId: 'session-uuid-1',
           revokedAt: null,
         }),
       );
       userRepository.findById.mockResolvedValue(mockUser);
 
-      // Simulate database crash or deadlock during rotation
-      const dbCrashError = new Error('Database transaction deadlock');
+      const dbCrashError = new Error('Database deadlock on update');
       refreshTokenRepository.rotate.mockRejectedValue(dbCrashError);
 
       await expect(
         useCase.execute({ refresh_token: rawRefreshJwtA }),
-      ).rejects.toThrow('Database transaction deadlock');
+      ).rejects.toThrow('Database deadlock on update');
     });
   });
 
-  describe('Refresh Token Reuse Detection & Token Family Revocation (9C-4)', () => {
-    it('TEST 5: detects token reuse when already-revoked token is presented, revokes entire family, and returns 401', async () => {
+  describe('Refresh Token Reuse Detection & Session Revocation (9C-4)', () => {
+    it('TEST 5: detects token reuse when already-revoked token is presented, revokes entire session, and returns 401', async () => {
       const consumedTokenHash = refreshTokenHashingService.hash(rawRefreshJwtA);
 
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-consumed',
-          token: consumedTokenHash,
+          tokenHash: consumedTokenHash,
           userId: 'user-uuid-123',
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(Date.now() - 1000 * 60 * 10),
-          familyId: 'compromised-family-123',
+          sessionId: 'compromised-session-123',
           revokedAt: new Date(Date.now() - 1000 * 60 * 5), // Already revoked!
         }),
       );
@@ -346,18 +363,21 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      // Entire family is revoked
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledTimes(1);
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledWith(
-        'compromised-family-123',
+      // Entire session is revoked
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledTimes(1);
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledWith(
+        'compromised-session-123',
+        'REUSE_DETECTED',
       );
 
       // No new tokens signed
       expect(refreshTokenRepository.rotate).not.toHaveBeenCalled();
     });
 
-    it('TEST 8: unknown token rejected with 401 and does NOT revoke any family', async () => {
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+    it('TEST 8: unknown token rejected with 401 and does NOT revoke any session', async () => {
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       refreshTokenRepository.findByTokenHash.mockResolvedValue(null);
 
       await expect(
@@ -366,13 +386,13 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.revokeSession).not.toHaveBeenCalled();
       expect(refreshTokenRepository.rotate).not.toHaveBeenCalled();
     });
 
-    it('TEST 9: tampered token rejected with 401 before database lookup, no family revoked', async () => {
-      jwtService.verifyAsync.mockRejectedValue(
-        new Error('invalid signature error'),
+    it('TEST 9: tampered token rejected with 401 before database lookup, no session revoked', async () => {
+      tokenService.verifyRefreshToken.mockRejectedValue(
+        new InvalidTokenError('invalid signature error'),
       );
 
       await expect(
@@ -380,40 +400,40 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
       ).rejects.toThrow(UnauthorizedException);
 
       expect(refreshTokenRepository.findByTokenHash).not.toHaveBeenCalled();
-      expect(refreshTokenRepository.revokeFamily).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.revokeSession).not.toHaveBeenCalled();
     });
 
-    it('TEST 14: family isolation — revoking family F1 does not affect active tokens in family F2', async () => {
-      // Simulate two families in simulated storage
+    it('TEST 14: session isolation — revoking session S1 does not affect active tokens in session S2', async () => {
+      // Simulate two sessions in simulated storage
       const dbTokens = new Map<string, RefreshTokenEntity>();
 
-      const hashF1_A = refreshTokenHashingService.hash(rawRefreshJwtA);
-      const hashF2_X = refreshTokenHashingService.hash(rawRefreshJwtB);
+      const hashS1_A = refreshTokenHashingService.hash(rawRefreshJwtA);
+      const hashS2_X = refreshTokenHashingService.hash(rawRefreshJwtB);
 
-      // Family F1: Token A (consumed)
+      // Session S1: Token A (consumed)
       dbTokens.set(
-        hashF1_A,
+        hashS1_A,
         new RefreshTokenEntity({
-          id: 'tok-f1-a',
-          token: hashF1_A,
+          id: 'tok-s1-a',
+          tokenHash: hashS1_A,
           userId: mockUser.id,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId: 'family-F1',
+          sessionId: 'session-S1',
           revokedAt: new Date(), // Revoked!
         }),
       );
 
-      // Family F2: Token X (active)
+      // Session S2: Token X (active)
       dbTokens.set(
-        hashF2_X,
+        hashS2_X,
         new RefreshTokenEntity({
-          id: 'tok-f2-x',
-          token: hashF2_X,
+          id: 'tok-s2-x',
+          tokenHash: hashS2_X,
           userId: mockUser.id,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId: 'family-F2',
+          sessionId: 'session-S2',
           revokedAt: null, // Active!
         }),
       );
@@ -421,49 +441,49 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
       refreshTokenRepository.findByTokenHash.mockImplementation((hash) =>
         Promise.resolve(dbTokens.get(hash) ?? null),
       );
-      refreshTokenRepository.revokeFamily.mockImplementation((familyId) => {
+      refreshTokenRepository.revokeSession.mockImplementation((sessionId) => {
         for (const token of dbTokens.values()) {
-          if (token.familyId === familyId) {
+          if (token.sessionId === sessionId) {
             token.revokedAt = new Date();
           }
         }
         return Promise.resolve();
       });
 
-      // 1. Presenting revoked Token A from Family F1 triggers reuse detection
-      jwtService.verifyAsync.mockResolvedValue({ sub: mockUser.id });
+      // 1. Presenting revoked Token A from Session S1 triggers reuse detection
+      tokenService.verifyRefreshToken.mockResolvedValue({ sub: mockUser.id });
       await expect(
         useCase.execute({ refresh_token: rawRefreshJwtA }),
       ).rejects.toThrow(
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledWith(
-        'family-F1',
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledWith(
+        'session-S1',
+        'REUSE_DETECTED',
       );
 
-      // 2. Family F1 is revoked, but Family F2 is completely unaffected!
-      expect(dbTokens.get(hashF1_A)?.revokedAt).not.toBeNull();
-      expect(dbTokens.get(hashF2_X)?.revokedAt).toBeNull(); // Remains ACTIVE!
+      // 2. Session S1 is revoked, but Session S2 is completely unaffected!
+      expect(dbTokens.get(hashS1_A)?.revokedAt).not.toBeNull();
+      expect(dbTokens.get(hashS2_X)?.revokedAt).toBeNull(); // Remains ACTIVE!
     });
   });
 
   describe('Sequential Rotation & Reuse Detection Lifecycle (Token A → B → reuse A revokes B)', () => {
-    it('proves rotated token A remains in DB as revoked, and presenting A again revokes family and invalidates B', async () => {
-      // In-memory token store simulating PostgreSQL RefreshToken table with 9C-4 model
+    it('proves rotated token A remains in DB as revoked, and presenting A again revokes session and invalidates B', async () => {
       const dbTokens = new Map<string, RefreshTokenEntity>();
 
-      // Initial state: Token A created on login (Family F1, active)
+      // Initial state: Token A created on login (Session S1, active)
       const hashA = refreshTokenHashingService.hash(rawRefreshJwtA);
       dbTokens.set(
         hashA,
         new RefreshTokenEntity({
           id: 'token-id-A',
-          token: hashA,
+          tokenHash: hashA,
           userId: mockUser.id,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
           createdAt: new Date(),
-          familyId: 'family-F1',
+          sessionId: 'session-S1',
           revokedAt: null,
         }),
       );
@@ -482,22 +502,22 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
         // Mark old token as revoked (NOT deleted)
         existing.revokedAt = new Date();
 
-        // Create replacement token in the same family
+        // Create replacement token in the same session
         const entity = new RefreshTokenEntity({
           id: `token-id-${Date.now()}`,
-          token: newData.token!,
-          userId: newData.userId!,
-          expiresAt: newData.expiresAt!,
+          tokenHash: newData.tokenHash,
+          userId: newData.userId,
+          expiresAt: newData.expiresAt,
           createdAt: new Date(),
-          familyId: newData.familyId!,
+          sessionId: newData.sessionId,
           revokedAt: null,
         });
-        dbTokens.set(newData.token!, entity);
+        dbTokens.set(newData.tokenHash, entity);
         return Promise.resolve(true);
       });
-      refreshTokenRepository.revokeFamily.mockImplementation((familyId) => {
+      refreshTokenRepository.revokeSession.mockImplementation((sessionId) => {
         for (const token of dbTokens.values()) {
-          if (token.familyId === familyId) {
+          if (token.sessionId === sessionId) {
             token.revokedAt = new Date();
           }
         }
@@ -505,7 +525,7 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
       });
 
       // Step 1: Normal refresh with Token A → produces Token B
-      jwtService.verifyAsync.mockResolvedValue({ sub: mockUser.id });
+      tokenService.verifyRefreshToken.mockResolvedValue({ sub: mockUser.id });
       const firstRefreshResult = await useCase.execute({
         refresh_token: rawRefreshJwtA,
       });
@@ -519,25 +539,26 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
       expect(dbTokens.get(hashA)?.revokedAt).not.toBeNull();
       expect(dbTokens.has(hashB)).toBe(true);
       expect(dbTokens.get(hashB)?.revokedAt).toBeNull();
-      expect(dbTokens.get(hashB)?.familyId).toBe('family-F1');
+      expect(dbTokens.get(hashB)?.sessionId).toBe('session-S1');
 
       // Step 2: Attacker replays consumed Token A (REUSE DETECTION!)
-      // Must fail with 401 AND revoke the entire family F1!
+      // Must fail with 401 AND revoke the entire session S1!
       await expect(
         useCase.execute({ refresh_token: rawRefreshJwtA }),
       ).rejects.toThrow(
         new UnauthorizedException('Invalid or revoked refresh token'),
       );
 
-      expect(refreshTokenRepository.revokeFamily).toHaveBeenCalledWith(
-        'family-F1',
+      expect(refreshTokenRepository.revokeSession).toHaveBeenCalledWith(
+        'session-S1',
+        'REUSE_DETECTED',
       );
 
       // Verify that Token B in the database is now revoked!
       expect(dbTokens.get(hashB)?.revokedAt).not.toBeNull();
 
       // Step 3: Legitimate client attempts to use Token B
-      // Must FAIL with 401 because its family was revoked due to Token A reuse!
+      // Must FAIL with 401 because its session was revoked due to Token A reuse!
       await expect(
         useCase.execute({ refresh_token: rawRefreshJwtB }),
       ).rejects.toThrow(
@@ -552,15 +573,17 @@ describe('RefreshUseCase — Token Rotation & Invalidation (9C-3)', () => {
     const tokenHash = 'test-token-hash-step94';
 
     beforeEach(() => {
-      jwtService.verifyAsync.mockResolvedValue({ sub: 'user-uuid-123' });
+      tokenService.verifyRefreshToken.mockResolvedValue({
+        sub: 'user-uuid-123',
+      });
       jest.spyOn(refreshTokenHashingService, 'hash').mockReturnValue(tokenHash);
 
       refreshTokenRepository.findByTokenHash.mockResolvedValue(
         new RefreshTokenEntity({
           id: 'token-id-94',
-          token: tokenHash,
+          tokenHash: tokenHash,
           userId: 'user-uuid-123',
-          familyId: 'family-94',
+          sessionId: 'session-94',
           revokedAt: null,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
         }),

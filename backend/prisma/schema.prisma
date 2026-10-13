@@ -325,16 +325,19 @@ model PlatformSetting {
 }
 
 model RefreshToken {
-  id        String    @id @default(uuid())
-  token     String    @unique
-  userId    String
-  expiresAt DateTime
-  createdAt DateTime  @default(now())
-  familyId  String    @default(uuid())
-  revokedAt DateTime?
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id            String    @id @default(uuid())
+  tokenHash     String    @unique
+  userId        String
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  sessionId     String    @default(uuid())
+  revokedAt     DateTime?
+  revokedReason String?
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([familyId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model PasswordReset {

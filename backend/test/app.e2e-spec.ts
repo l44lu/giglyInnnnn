@@ -12,6 +12,7 @@ import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import cookieParser from 'cookie-parser';
 import { LoginRateLimitGuard } from '../src/presentation/guards/login-rate-limit.guard';
+import { RefreshRateLimitGuard } from '../src/presentation/guards/refresh-rate-limit.guard';
 import { configureTrustProxy } from '../src/presentation/proxy/trust-proxy.config';
 
 function getRefreshTokenFromCookie(res: request.Response): string {
@@ -70,6 +71,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
   beforeEach(() => {
     LoginRateLimitGuard.reset();
+    RefreshRateLimitGuard.reset();
   });
 
   afterAll(async () => {
@@ -158,7 +160,11 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
     it('should successfully authenticate real WORKER user from database via access_token cookie', async () => {
       const workerUser = await prismaService.user.findFirst({
-        where: { role: { code: Role.WORKER } },
+        where: {
+          role: { code: Role.WORKER },
+          isActive: true,
+          isBlocked: false,
+        },
         include: { role: true },
       });
 
@@ -185,7 +191,11 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
     it('should successfully authenticate real RECRUITER user from database via access_token cookie', async () => {
       const recruiterUser = await prismaService.user.findFirst({
-        where: { role: { code: Role.RECRUITER } },
+        where: {
+          role: { code: Role.RECRUITER },
+          isActive: true,
+          isBlocked: false,
+        },
         include: { role: true },
       });
 
@@ -347,22 +357,22 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .digest('hex');
 
       // Database stores ONLY the 64-character hexadecimal SHA-256 hash
-      expect(savedRecord.token).not.toBe(rawRefreshToken);
-      expect(savedRecord.token).not.toContain('eyJ');
-      expect(savedRecord.token).toHaveLength(64);
-      expect(savedRecord.token).toMatch(/^[0-9a-f]{64}$/);
-      expect(savedRecord.token).toBe(expectedHash);
+      expect(savedRecord.tokenHash).not.toBe(rawRefreshToken);
+      expect(savedRecord.tokenHash).not.toContain('eyJ');
+      expect(savedRecord.tokenHash).toHaveLength(64);
+      expect(savedRecord.tokenHash).toMatch(/^[0-9a-f]{64}$/);
+      expect(savedRecord.tokenHash).toBe(expectedHash);
 
       // 9C-4: Token family model verification
-      expect(savedRecord.familyId).toBeDefined();
-      expect(savedRecord.familyId.length).toBeGreaterThanOrEqual(32);
+      expect(savedRecord.sessionId).toBeDefined();
+      expect(savedRecord.sessionId.length).toBeGreaterThanOrEqual(32);
       expect(savedRecord.revokedAt).toBeNull(); // ACTIVE
 
       // Verify table contains NO plaintext JWTs
       const allDbTokens = await prismaService.refreshToken.findMany();
       for (const t of allDbTokens) {
-        expect(t.token).toHaveLength(64);
-        expect(t.token.startsWith('eyJ')).toBe(false);
+        expect(t.tokenHash).toHaveLength(64);
+        expect(t.tokenHash.startsWith('eyJ')).toBe(false);
       }
     });
 
@@ -382,10 +392,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .digest('hex');
 
       const tokenRecordA = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
       expect(tokenRecordA).not.toBeNull();
-      const familyId = tokenRecordA!.familyId;
+      const familyId = tokenRecordA!.sessionId;
       expect(tokenRecordA!.revokedAt).toBeNull();
 
       // Step 2: First rotation A -> B
@@ -406,18 +416,18 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // Verify DB: Token A remains persisted but revoked; Token B is active with same familyId
       const dbTokenAAfter1 = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
       expect(dbTokenAAfter1).not.toBeNull();
       expect(dbTokenAAfter1!.revokedAt).not.toBeNull(); // REVOKED
-      expect(dbTokenAAfter1!.familyId).toBe(familyId);
+      expect(dbTokenAAfter1!.sessionId).toBe(familyId);
 
       const dbTokenB = await prismaService.refreshToken.findUnique({
-        where: { token: hashB },
+        where: { tokenHash: hashB },
       });
       expect(dbTokenB).not.toBeNull();
       expect(dbTokenB!.revokedAt).toBeNull(); // ACTIVE
-      expect(dbTokenB!.familyId).toBe(familyId); // Same family!
+      expect(dbTokenB!.sessionId).toBe(familyId); // Same family!
 
       // Verify newly issued access token works on /auth/me
       const rawAccessTokenB = getAccessTokenFromCookie(refreshRes1);
@@ -443,16 +453,16 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .digest('hex');
 
       const dbTokenBAfter2 = await prismaService.refreshToken.findUnique({
-        where: { token: hashB },
+        where: { tokenHash: hashB },
       });
       expect(dbTokenBAfter2!.revokedAt).not.toBeNull(); // REVOKED
-      expect(dbTokenBAfter2!.familyId).toBe(familyId);
+      expect(dbTokenBAfter2!.sessionId).toBe(familyId);
 
       const dbTokenC = await prismaService.refreshToken.findUnique({
-        where: { token: hashC },
+        where: { tokenHash: hashC },
       });
       expect(dbTokenC!.revokedAt).toBeNull(); // ACTIVE
-      expect(dbTokenC!.familyId).toBe(familyId); // Same family!
+      expect(dbTokenC!.sessionId).toBe(familyId); // Same family!
 
       // Step 4: Third rotation C -> D
       const refreshRes3 = await request(httpServer)
@@ -470,24 +480,26 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .digest('hex');
 
       const dbTokenCAfter3 = await prismaService.refreshToken.findUnique({
-        where: { token: hashC },
+        where: { tokenHash: hashC },
       });
       expect(dbTokenCAfter3!.revokedAt).not.toBeNull(); // REVOKED
-      expect(dbTokenCAfter3!.familyId).toBe(familyId);
+      expect(dbTokenCAfter3!.sessionId).toBe(familyId);
 
       const dbTokenD = await prismaService.refreshToken.findUnique({
-        where: { token: hashD },
+        where: { tokenHash: hashD },
       });
       expect(dbTokenD!.revokedAt).toBeNull(); // ACTIVE
-      expect(dbTokenD!.familyId).toBe(familyId); // Same family!
+      expect(dbTokenD!.sessionId).toBe(familyId); // Same family!
 
       // Verify all 4 tokens (A, B, C, D) exist in DB and share the same familyId
       const familyTokens = await prismaService.refreshToken.findMany({
-        where: { familyId },
+        where: { sessionId: familyId },
       });
       expect(familyTokens).toHaveLength(4);
       expect(
-        familyTokens.filter((t) => t.revokedAt === null).map((t) => t.token),
+        familyTokens
+          .filter((t) => t.revokedAt === null)
+          .map((t) => t.tokenHash),
       ).toEqual([hashD]);
     });
 
@@ -516,9 +528,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       const hashA = crypto.createHash('sha256').update(rawA).digest('hex');
       const tokenRecA = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
-      const reuseFamilyId = tokenRecA!.familyId;
+      const reuseFamilyId = tokenRecA!.sessionId;
 
       // 2. TEST 5: Present already-consumed Token A again (REUSE ATTACK!)
       const replayRes = await request(httpServer)
@@ -528,7 +540,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // Verify the entire family is now revoked in PostgreSQL!
       const familyTokens = await prismaService.refreshToken.findMany({
-        where: { familyId: reuseFamilyId },
+        where: { sessionId: reuseFamilyId },
       });
       expect(familyTokens.length).toBeGreaterThanOrEqual(4);
       for (const t of familyTokens) {
@@ -577,9 +589,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .digest('hex');
 
       const recUser1_A = await prismaService.refreshToken.findUnique({
-        where: { token: hashUser1_A },
+        where: { tokenHash: hashUser1_A },
       });
-      const familyUser1 = recUser1_A!.familyId;
+      const familyUser1 = recUser1_A!.sessionId;
 
       // User 1 rotates A -> B
       const user1Rotate = await request(httpServer)
@@ -600,9 +612,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .digest('hex');
 
       const recUser2_X = await prismaService.refreshToken.findUnique({
-        where: { token: hashUser2_X },
+        where: { tokenHash: hashUser2_X },
       });
-      const familyUser2 = recUser2_X!.familyId;
+      const familyUser2 = recUser2_X!.sessionId;
 
       // Ensure distinct families
       expect(familyUser1).not.toBe(familyUser2);
@@ -622,7 +634,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // User 2's family is revoked
       const tokensUser2 = await prismaService.refreshToken.findMany({
-        where: { familyId: familyUser2 },
+        where: { sessionId: familyUser2 },
       });
       for (const t of tokensUser2) {
         expect(t.revokedAt).not.toBeNull();
@@ -639,7 +651,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .update(rawUser1_B)
         .digest('hex');
       const recUser1_B = await prismaService.refreshToken.findUnique({
-        where: { token: hashUser1_B },
+        where: { tokenHash: hashUser1_B },
       });
       expect(recUser1_B!.revokedAt).toBeNull(); // Still ACTIVE!
 
@@ -708,17 +720,17 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       // Persist Token A hash in DB as active
       await prismaService.refreshToken.create({
         data: {
-          token: hashA,
+          tokenHash: hashA,
           userId: refreshUserId,
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
-          familyId: rollbackFamilyId,
+          sessionId: rollbackFamilyId,
           revokedAt: null,
         },
       });
 
       // Verify Token A exists in PostgreSQL and is active
       const tokenABefore = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
       expect(tokenABefore).not.toBeNull();
       expect(tokenABefore!.revokedAt).toBeNull();
@@ -731,10 +743,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       await expect(
         refreshTokenRepository.rotate(hashA, {
-          token: invalidReplacementHash,
+          tokenHash: invalidReplacementHash,
           userId: '00000000-0000-0000-0000-000000000000', // Non-existent user -> FK constraint failure P2003
           expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
-          familyId: rollbackFamilyId,
+          sessionId: rollbackFamilyId,
         }),
       ).rejects.toThrow();
 
@@ -742,16 +754,16 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       // The update marking Token A revoked was rolled back, so revokedAt remains NULL!
       const tokenAAfterFailedRotate =
         await prismaService.refreshToken.findUnique({
-          where: { token: hashA },
+          where: { tokenHash: hashA },
         });
       expect(tokenAAfterFailedRotate).not.toBeNull();
-      expect(tokenAAfterFailedRotate?.token).toBe(hashA);
+      expect(tokenAAfterFailedRotate?.tokenHash).toBe(hashA);
       expect(tokenAAfterFailedRotate?.revokedAt).toBeNull(); // ROLLED BACK TO ACTIVE!
 
       // Replacement token was NOT persisted
       const failedReplacementToken =
         await prismaService.refreshToken.findUnique({
-          where: { token: invalidReplacementHash },
+          where: { tokenHash: invalidReplacementHash },
         });
       expect(failedReplacementToken).toBeNull();
 
@@ -772,17 +784,17 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // Now Token A is revoked and Token B exists as active
       const tokenAAfterSuccess = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
       expect(tokenAAfterSuccess).not.toBeNull();
       expect(tokenAAfterSuccess!.revokedAt).not.toBeNull(); // REVOKED
 
       const tokenBAfterSuccess = await prismaService.refreshToken.findUnique({
-        where: { token: hashB },
+        where: { tokenHash: hashB },
       });
       expect(tokenBAfterSuccess).not.toBeNull();
       expect(tokenBAfterSuccess!.revokedAt).toBeNull(); // ACTIVE
-      expect(tokenBAfterSuccess!.familyId).toBe(rollbackFamilyId);
+      expect(tokenBAfterSuccess!.sessionId).toBe(rollbackFamilyId);
     });
 
     it('CONCURRENT REFRESH PROTECTION (STEP 19): two concurrent refresh requests for the same token cannot both succeed, exactly one rotates or both fail, and no duplicate active tokens exist in DB', async () => {
@@ -796,9 +808,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       const hashA = crypto.createHash('sha256').update(rawTokenA).digest('hex');
 
       const tokenRecA = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
-      const raceFamilyId = tokenRecA!.familyId;
+      const raceFamilyId = tokenRecA!.sessionId;
 
       // 2. Dispatch two concurrent refresh requests presenting the exact same Token A
       const [res1, res2] = await Promise.all([
@@ -825,7 +837,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       // 3. Database verification:
       // The old token A must be marked revoked
       const tokenAAfterRace = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
       expect(tokenAAfterRace!.revokedAt).not.toBeNull();
 
@@ -833,7 +845,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       const activeReplacementTokens = await prismaService.refreshToken.findMany(
         {
           where: {
-            familyId: raceFamilyId,
+            sessionId: raceFamilyId,
             revokedAt: null,
           },
         },
@@ -903,10 +915,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .digest('hex');
 
       const initialToken = await prismaService.refreshToken.findUnique({
-        where: { token: tokenHash },
+        where: { tokenHash: tokenHash },
       });
       expect(initialToken).not.toBeNull();
-      const familyId = initialToken!.familyId;
+      const familyId = initialToken!.sessionId;
       expect(initialToken!.revokedAt).toBeNull();
 
       // 2. Authenticated logout request with cookies
@@ -918,7 +930,6 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         ]);
 
       expect(logoutRes.status).toBe(200);
-      expect(logoutRes.body).toEqual({ message: 'Logged out successfully' });
       expect(logoutRes.body.access_token).toBeUndefined();
       expect(logoutRes.body.refresh_token).toBeUndefined();
 
@@ -939,15 +950,15 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       // 3. PostgreSQL direct verification:
       // Token was NOT physically deleted; it is marked revoked!
       const tokenAfterLogout = await prismaService.refreshToken.findUnique({
-        where: { token: tokenHash },
+        where: { tokenHash: tokenHash },
       });
       expect(tokenAfterLogout).not.toBeNull();
       expect(tokenAfterLogout!.revokedAt).not.toBeNull();
-      expect(tokenAfterLogout!.familyId).toBe(familyId);
+      expect(tokenAfterLogout!.sessionId).toBe(familyId);
 
       // Verify token remains hashed (64-char hex, no raw JWT in DB)
-      expect(tokenAfterLogout!.token).toHaveLength(64);
-      expect(tokenAfterLogout!.token).not.toContain('eyJ');
+      expect(tokenAfterLogout!.tokenHash).toHaveLength(64);
+      expect(tokenAfterLogout!.tokenHash).not.toContain('eyJ');
     });
 
     it('LOGOUT (TEST 3 & 4): previously active refresh token cannot refresh after logout, and the entire family is permanently revoked', async () => {
@@ -969,9 +980,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
       const hashA = crypto.createHash('sha256').update(rawA).digest('hex');
       const hashB = crypto.createHash('sha256').update(rawB).digest('hex');
       const tokenRecA = await prismaService.refreshToken.findUnique({
-        where: { token: hashA },
+        where: { tokenHash: hashA },
       });
-      const familyId = tokenRecA!.familyId;
+      const familyId = tokenRecA!.sessionId;
 
       // 2. Log out using active Token B via cookies
       const logoutRes = await request(httpServer)
@@ -984,10 +995,10 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // 3. Verify ALL family members (Token A and Token B) are now revoked in DB
       const familyTokens = await prismaService.refreshToken.findMany({
-        where: { familyId },
+        where: { sessionId: familyId },
       });
       expect(familyTokens).toHaveLength(2);
-      expect(familyTokens.map((t) => t.token)).toEqual(
+      expect(familyTokens.map((t) => t.tokenHash)).toEqual(
         expect.arrayContaining([hashA, hashB]),
       );
       for (const t of familyTokens) {
@@ -1020,9 +1031,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .update(laptopRefreshToken)
         .digest('hex');
       const laptopRecord = await prismaService.refreshToken.findUnique({
-        where: { token: laptopHash },
+        where: { tokenHash: laptopHash },
       });
-      const laptopFamilyId = laptopRecord!.familyId;
+      const laptopFamilyId = laptopRecord!.sessionId;
 
       // 2. Session 2: Phone login
       const phoneLogin = await request(httpServer).post('/auth/login').send({
@@ -1035,9 +1046,9 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .update(phoneRefreshToken)
         .digest('hex');
       const phoneRecord = await prismaService.refreshToken.findUnique({
-        where: { token: phoneHash },
+        where: { tokenHash: phoneHash },
       });
-      const phoneFamilyId = phoneRecord!.familyId;
+      const phoneFamilyId = phoneRecord!.sessionId;
 
       // Verify distinct families for the same user
       expect(laptopFamilyId).not.toBe(phoneFamilyId);
@@ -1053,12 +1064,12 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // 4. In PostgreSQL: Laptop family is revoked, Phone family is ACTIVE
       const laptopAfter = await prismaService.refreshToken.findUnique({
-        where: { token: laptopHash },
+        where: { tokenHash: laptopHash },
       });
       expect(laptopAfter!.revokedAt).not.toBeNull();
 
       const phoneAfter = await prismaService.refreshToken.findUnique({
-        where: { token: phoneHash },
+        where: { tokenHash: phoneHash },
       });
       expect(phoneAfter!.revokedAt).toBeNull(); // STILL ACTIVE!
 
@@ -1102,7 +1113,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // User 2's token remains completely active in DB
       const user2TokenInDb = await prismaService.refreshToken.findUnique({
-        where: { token: user2Hash },
+        where: { tokenHash: user2Hash },
       });
       expect(user2TokenInDb!.revokedAt).toBeNull();
 
@@ -1143,7 +1154,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
 
       // Verify User 2's token was NOT revoked!
       const user2Token = await prismaService.refreshToken.findUnique({
-        where: { token: user2Hash },
+        where: { tokenHash: user2Hash },
       });
       expect(user2Token!.revokedAt).toBeNull();
 
@@ -1218,7 +1229,7 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         .update(refreshToken)
         .digest('hex');
       const tokenRec = await prismaService.refreshToken.findUnique({
-        where: { token: hash },
+        where: { tokenHash: hash },
       });
       expect(tokenRec!.revokedAt).not.toBeNull();
     });
@@ -1997,7 +2008,6 @@ describe('RBAC & Auth End-to-End Verification (e2e)', () => {
         ]);
 
       expect(logoutRes.status).toBe(200);
-      expect(logoutRes.body.message).toBe('Logged out successfully');
       expect(logoutRes.body.access_token).toBeUndefined();
       expect(logoutRes.body.refresh_token).toBeUndefined();
 

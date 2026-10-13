@@ -7,8 +7,9 @@ import {
   ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { ITokenService } from '../../domain/services/token.service.interface';
+import { AuthCookieService } from '../auth/services/auth-cookie.service';
 import type { Response } from 'express';
 import { WorkerProfileController } from './worker-profile.controller';
 import { IGetWorkerProfileUseCase } from '../../application/use-cases/worker-profile/interface/get-worker-profile.use-case.interface';
@@ -23,6 +24,7 @@ import { UpdateWorkerPersonalProfileInputDto } from '../../application/dto/worke
 import { UserResponseDto } from '../../application/dto/user/user-response.dto';
 import { Role } from '../../domain/enums/role.enum';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { BYPASS_RESPONSE_WRAPPER_KEY } from '../decorators/bypass-response-wrapper.decorator';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 
@@ -109,13 +111,19 @@ describe('WorkerProfileController', () => {
           useValue: { findById: jest.fn(), findByEmail: jest.fn() },
         },
         {
-          provide: JwtService,
-          useValue: { verifyAsync: jest.fn() },
+          provide: ITokenService,
+          useValue: {
+            verifyAccessToken: jest.fn(),
+            verifyRefreshToken: jest.fn(),
+            issueAccessToken: jest.fn(),
+            issueRefreshToken: jest.fn(),
+          },
         },
         {
           provide: ConfigService,
           useValue: { get: jest.fn() },
         },
+        AuthCookieService,
         Reflector,
       ],
     }).compile();
@@ -166,6 +174,14 @@ describe('WorkerProfileController', () => {
       const roles = reflector.get<Role[]>(ROLES_KEY, controller.getAvatar);
       expect(roles).toBeDefined();
       expect(roles).toEqual([Role.WORKER]);
+    });
+
+    it('should have @BypassResponseWrapper() configured on getAvatar handler', () => {
+      const isBypassed = reflector.get<boolean>(
+        BYPASS_RESPONSE_WRAPPER_KEY,
+        controller.getAvatar,
+      );
+      expect(isBypassed).toBe(true);
     });
 
     it('should apply JwtAuthGuard and RolesGuard to the controller class', () => {

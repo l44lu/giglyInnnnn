@@ -29,7 +29,7 @@ export class OtpRateLimitGuard implements CanActivate {
     const now = Date.now();
     const timestamps = OtpRateLimitGuard.hitMap.get(key) || [];
 
-    // Filter out timestamps outside the sliding window
+    // filtering out timestamps outside the sliding window ennale time kittu
     const validTimestamps = timestamps.filter((time) => now - time < windowMs);
 
     if (validTimestamps.length >= limit) {

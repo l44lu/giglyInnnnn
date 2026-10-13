@@ -7,8 +7,9 @@ import {
   UnauthorizedException,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { ITokenService } from '../../domain/services/token.service.interface';
+import { AuthCookieService } from '../auth/services/auth-cookie.service';
 import { AdminUserManagementController } from './admin-user-management.controller';
 import { IListAdminUserUseCase } from '../../application/use-cases/admin-user-management/interface/list-admin-users.use-case.interface';
 import { IGetAdminUserUseCase } from '../../application/use-cases/admin-user-management/interface/get-admin-user.use-case.interface';
@@ -122,13 +123,19 @@ describe('AdminUserManagementController', () => {
           useValue: { findById: jest.fn(), findByEmail: jest.fn() },
         },
         {
-          provide: JwtService,
-          useValue: { verifyAsync: jest.fn() },
+          provide: ITokenService,
+          useValue: {
+            verifyAccessToken: jest.fn(),
+            verifyRefreshToken: jest.fn(),
+            issueAccessToken: jest.fn(),
+            issueRefreshToken: jest.fn(),
+          },
         },
         {
           provide: ConfigService,
           useValue: { get: jest.fn() },
         },
+        AuthCookieService,
         Reflector,
       ],
     }).compile();

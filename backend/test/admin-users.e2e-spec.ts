@@ -165,7 +165,11 @@ describe('Admin User Management GET /admin/users, GET /admin/users/:userId & PAT
   describe('3. RECRUITER ACCESS (RBAC Forbidden)', () => {
     it('GET /admin/users with real RECRUITER session -> 403 Forbidden', async () => {
       const recruiterUser = await prismaService.user.findFirst({
-        where: { role: { code: Role.RECRUITER } },
+        where: {
+          role: { code: Role.RECRUITER },
+          isActive: true,
+          isBlocked: false,
+        },
         include: { role: true },
       });
       expect(recruiterUser).toBeDefined();
@@ -190,7 +194,11 @@ describe('Admin User Management GET /admin/users, GET /admin/users/:userId & PAT
 
     it('GET /admin/users/:userId with real RECRUITER session -> 403 Forbidden', async () => {
       const recruiterUser = await prismaService.user.findFirst({
-        where: { role: { code: Role.RECRUITER } },
+        where: {
+          role: { code: Role.RECRUITER },
+          isActive: true,
+          isBlocked: false,
+        },
         include: { role: true },
       });
       expect(recruiterUser).toBeDefined();
@@ -471,7 +479,11 @@ describe('Admin User Management GET /admin/users, GET /admin/users/:userId & PAT
 
     it('PATCH /admin/users/:userId with real RECRUITER session -> 403 Forbidden (no DB mutation)', async () => {
       const recruiterUser = await prismaService.user.findFirst({
-        where: { role: { code: Role.RECRUITER } },
+        where: {
+          role: { code: Role.RECRUITER },
+          isActive: true,
+          isBlocked: false,
+        },
         include: { role: true },
       });
       expect(recruiterUser).toBeDefined();

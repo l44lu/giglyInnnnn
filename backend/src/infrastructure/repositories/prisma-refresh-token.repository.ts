@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { IRefreshTokenRepository } from '../../domain/repositories/refresh-token.repository.interface';
+import {
+  IRefreshTokenRepository,
+  RotateRefreshTokenData,
+} from '../../domain/repositories/refresh-token.repository.interface';
 import { RefreshTokenEntity } from '../../domain/entities/refresh-token.entity';
 import { PrismaService } from '../prisma/prisma.service';
 import { RefreshToken, Prisma } from '@prisma/client';
@@ -17,31 +20,28 @@ export class PrismaRefreshTokenRepository
   protected mapToDomain(token: RefreshToken): RefreshTokenEntity {
     return new RefreshTokenEntity({
       id: token.id,
-      token: token.token,
+      tokenHash: token.tokenHash,
       userId: token.userId,
       expiresAt: token.expiresAt,
       createdAt: token.createdAt,
-      familyId: token.familyId,
+      sessionId: token.sessionId,
       revokedAt: token.revokedAt,
+      revokedReason: token.revokedReason,
     });
   }
 
   async findByTokenHash(tokenHash: string): Promise<RefreshTokenEntity | null> {
     const refreshToken = await this.prisma.refreshToken.findUnique({
-      where: { token: tokenHash },
+      where: { tokenHash },
     });
     if (!refreshToken) return null;
     return this.mapToDomain(refreshToken);
   }
 
-  async findByToken(token: string): Promise<RefreshTokenEntity | null> {
-    return this.findByTokenHash(token);
-  }
-
   async deleteByTokenHash(tokenHash: string): Promise<boolean> {
     try {
       await this.prisma.refreshToken.delete({
-        where: { token: tokenHash },
+        where: { tokenHash },
       });
       return true;
     } catch (error) {
@@ -55,18 +55,15 @@ export class PrismaRefreshTokenRepository
     }
   }
 
-  async deleteByToken(token: string): Promise<boolean> {
-    return this.deleteByTokenHash(token);
-  }
-
   async create(data: Partial<RefreshTokenEntity>): Promise<RefreshTokenEntity> {
     const refreshToken = await this.prisma.refreshToken.create({
       data: {
-        token: data.token!,
+        tokenHash: data.tokenHash!,
         userId: data.userId!,
         expiresAt: data.expiresAt!,
-        familyId: data.familyId!,
+        sessionId: data.sessionId!,
         revokedAt: data.revokedAt ?? null,
+        revokedReason: data.revokedReason ?? null,
       },
     });
     return this.mapToDomain(refreshToken);
@@ -74,33 +71,38 @@ export class PrismaRefreshTokenRepository
 
   async rotate(
     oldTokenHash: string,
-    newTokenData: Partial<RefreshTokenEntity>,
+    newTokenData: RotateRefreshTokenData,
+    reason: string = 'ROTATED',
   ): Promise<boolean> {
+    const { tokenHash, sessionId, userId, expiresAt } = newTokenData;
+
     return await this.prisma.$transaction(async (tx) => {
-      // Atomically consume old token: only update if currently active (revokedAt is null)
+      // 1. Atomically consume old token: only update if currently active (revokedAt is null)
       const updateResult = await tx.refreshToken.updateMany({
         where: {
-          token: oldTokenHash,
+          tokenHash: oldTokenHash,
           revokedAt: null,
         },
         data: {
           revokedAt: new Date(),
+          revokedReason: reason,
         },
       });
 
-      // If count is 0, the token does not exist or was already revoked
+      // 2. If count is 0, the token does not exist or was already revoked (conditional invariant)
       if (updateResult.count === 0) {
         return false;
       }
 
-      // Persist replacement token with same familyId and active state (revokedAt: null)
+      // 3. Persist replacement token with same sessionId and active state (revokedAt: null)
       await tx.refreshToken.create({
         data: {
-          token: newTokenData.token!,
-          userId: newTokenData.userId!,
-          expiresAt: newTokenData.expiresAt!,
-          familyId: newTokenData.familyId!,
+          tokenHash,
+          userId,
+          expiresAt,
+          sessionId,
           revokedAt: null,
+          revokedReason: null,
         },
       });
 
@@ -108,19 +110,20 @@ export class PrismaRefreshTokenRepository
     });
   }
 
-  async revokeFamily(familyId: string): Promise<void> {
+  async revokeSession(sessionId: string, reason?: string): Promise<void> {
     await this.prisma.refreshToken.updateMany({
       where: {
-        familyId,
+        sessionId,
         revokedAt: null,
       },
       data: {
         revokedAt: new Date(),
+        revokedReason: reason ?? null,
       },
     });
   }
 
-  async revokeAllForUser(userId: string): Promise<void> {
+  async revokeAllForUser(userId: string, reason?: string): Promise<void> {
     await this.prisma.refreshToken.updateMany({
       where: {
         userId,
@@ -128,6 +131,7 @@ export class PrismaRefreshTokenRepository
       },
       data: {
         revokedAt: new Date(),
+        revokedReason: reason ?? null,
       },
     });
   }

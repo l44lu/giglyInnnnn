@@ -110,9 +110,15 @@ describe('Admin User Deactivation PATCH /admin/users/:userId/deactivate (e2e)', 
       });
     }
 
-    const foundAdmin = allUsers.find((u) => u.role.code === Role.ADMIN);
-    const foundWorker = allUsers.find((u) => u.role.code === Role.WORKER);
-    const foundRecruiter = allUsers.find((u) => u.role.code === Role.RECRUITER);
+    const foundAdmin = allUsers.find(
+      (u) => u.role.code === Role.ADMIN && u.isActive && !u.isBlocked,
+    );
+    const foundWorker = allUsers.find(
+      (u) => u.role.code === Role.WORKER && u.isActive && !u.isBlocked,
+    );
+    const foundRecruiter = allUsers.find(
+      (u) => u.role.code === Role.RECRUITER && u.isActive && !u.isBlocked,
+    );
 
     expect(foundAdmin).toBeDefined();
     expect(foundWorker).toBeDefined();
@@ -359,13 +365,13 @@ describe('Admin User Deactivation PATCH /admin/users/:userId/deactivate (e2e)', 
         .createHash('sha256')
         .update(rawRefreshToken)
         .digest('hex');
-      const familyId = crypto.randomUUID();
+      const sessionId = crypto.randomUUID();
 
       await prismaService.refreshToken.create({
         data: {
-          token: tokenHash,
+          tokenHash,
           userId: targetId,
-          familyId,
+          sessionId,
           expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
           revokedAt: null,
         },
@@ -530,15 +536,47 @@ describe('Admin User Deactivation PATCH /admin/users/:userId/deactivate (e2e)', 
     });
   });
 
-  describe('9. BLOCKED + INACTIVE COMBINATION INSPECTION & REAL DATABASE LIMITATION', () => {
-    it('inspects database for blocked accounts and verifies limitation without mutating accounts', async () => {
-      const blockedUsers = await prismaService.user.findMany({
-        where: { isBlocked: true },
+  describe('9. BLOCKED + INACTIVE COMBINATION & DEACTIVATION BEHAVIOR', () => {
+    it('deactivates an already-blocked user using an isolated fixture and verifies isBlocked preservation', async () => {
+      const adminCookie = createAuthCookie(adminUser);
+      const targetId = workerUser.id;
+
+      // Temporarily mark worker as blocked (isolated fixture)
+      await prismaService.user.update({
+        where: { id: targetId },
+        data: { isBlocked: true },
       });
 
-      // Report condition: If no blocked user exists in the current database,
-      // record that deactivating an existing blocked user cannot be tested without manufacturing state.
-      expect(blockedUsers.length).toBe(0);
+      try {
+        const res = await request(httpServer)
+          .patch(`/admin/users/${targetId}/deactivate`)
+          .set('Cookie', [adminCookie]);
+
+        expect(res.status).toBe(200);
+        expect(res.body.id).toBe(targetId);
+        expect(res.body.isActive).toBe(false);
+        expect(res.body.isBlocked).toBe(true);
+        expect(res.body.role).toBe(Role.WORKER);
+
+        // Direct PostgreSQL check: isActive is false and isBlocked remains true
+        const dbUser = await prismaService.user.findUnique({
+          where: { id: targetId },
+        });
+        expect(dbUser).toBeDefined();
+        expect(dbUser!.isActive).toBe(false);
+        expect(dbUser!.isBlocked).toBe(true);
+      } finally {
+        // Guaranteed restoration
+        await prismaService.user.update({
+          where: { id: targetId },
+          data: { isActive: true, isBlocked: false },
+        });
+        const restoredUser = await prismaService.user.findUnique({
+          where: { id: targetId },
+        });
+        expect(restoredUser!.isActive).toBe(true);
+        expect(restoredUser!.isBlocked).toBe(false);
+      }
     });
   });
 

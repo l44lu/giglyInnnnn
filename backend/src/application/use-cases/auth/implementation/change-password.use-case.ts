@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import * as bcrypt from 'bcrypt';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
+import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { ChangePasswordInputDto } from '../../../dto/auth/change-password-input.dto';
 import { IChangePasswordUseCase } from '../interface/change-password.use-case.interface';
 
@@ -15,6 +16,8 @@ export class ChangePasswordUseCase implements IChangePasswordUseCase {
   constructor(
     @Inject(IUserRepository)
     private readonly userRepository: IUserRepository,
+    @Inject(IRefreshTokenRepository)
+    private readonly refreshTokenRepository: IRefreshTokenRepository,
   ) {}
 
   async execute(
@@ -63,6 +66,12 @@ export class ChangePasswordUseCase implements IChangePasswordUseCase {
 
     // 6. Persist the new password hash via IUserRepository
     await this.userRepository.updatePassword(user.id, hashedPassword);
+
+    // 7. Revoke all existing refresh-token sessions for user upon password change
+    await this.refreshTokenRepository.revokeAllForUser(
+      user.id,
+      'PASSWORD_CHANGED',
+    );
 
     return {
       message: 'Password changed successfully',

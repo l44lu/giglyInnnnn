@@ -11,8 +11,7 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Request, Response, CookieOptions } from 'express';
-import { ConfigService } from '@nestjs/config';
+import type { Request, Response } from 'express';
 import { ILoginUseCase } from '../../application/use-cases/auth/interface/login.use-case.interface';
 import { IRefreshUseCase } from '../../application/use-cases/auth/interface/refresh.use-case.interface';
 import { ISendOtpUseCase } from '../../application/use-cases/auth/interface/send-otp.use-case.interface';
@@ -36,7 +35,10 @@ import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
 import { OtpRateLimitGuard } from '../guards/otp-rate-limit.guard';
 import { LoginRateLimitGuard } from '../guards/login-rate-limit.guard';
+import { RefreshRateLimitGuard } from '../guards/refresh-rate-limit.guard';
 import { CurrentUser } from '../decorators/current-user.decorator';
+import { ResponseMessage } from '../decorators/response-message.decorator';
+import { AuthCookieService } from './services/auth-cookie.service';
 
 @Controller('auth')
 export class AuthController {
@@ -61,54 +63,8 @@ export class AuthController {
     private readonly resetPasswordUseCase: IResetPasswordUseCase,
     @Inject(IChangePasswordUseCase)
     private readonly changePasswordUseCase: IChangePasswordUseCase,
-    private readonly configService: ConfigService,
+    private readonly authCookieService: AuthCookieService,
   ) {}
-
-  private getRefreshCookieOptions(): CookieOptions {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    return {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'strict',
-      path: '/auth',
-      maxAge: 7 * 24 * 60 * 60 * 1000,
-    };
-  }
-
-  private getClearCookieOptions(): CookieOptions {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    return {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'strict',
-      path: '/auth',
-    };
-  }
-
-  private getAccessCookieOptions(): CookieOptions {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    return {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'strict',
-      path: '/',
-      maxAge: 1 * 60 * 60 * 1000,
-    };
-  }
-
-  private getClearAccessCookieOptions(): CookieOptions {
-    const isProduction =
-      this.configService.get<string>('NODE_ENV') === 'production';
-    return {
-      httpOnly: true,
-      secure: isProduction,
-      sameSite: 'strict',
-      path: '/',
-    };
-  }
 
   @Post('register/send-otp')
   @UseGuards(OtpRateLimitGuard)
@@ -131,19 +87,11 @@ export class AuthController {
     const result = await this.loginUseCase.execute(body);
 
     if (result.access_token) {
-      res.cookie(
-        'access_token',
-        result.access_token,
-        this.getAccessCookieOptions(),
-      );
+      this.authCookieService.setAccessCookie(res, result.access_token);
     }
 
     if (result.refresh_token) {
-      res.cookie(
-        'refresh_token',
-        result.refresh_token,
-        this.getRefreshCookieOptions(),
-      );
+      this.authCookieService.setRefreshCookie(res, result.refresh_token);
     }
 
     return {
@@ -152,11 +100,12 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @UseGuards(RefreshRateLimitGuard)
   async refresh(
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const refreshToken = req.cookies?.refresh_token as string | undefined;
+    const refreshToken = this.authCookieService.getRefreshToken(req);
     if (
       !refreshToken ||
       typeof refreshToken !== 'string' ||
@@ -170,19 +119,11 @@ export class AuthController {
     });
 
     if (result.access_token) {
-      res.cookie(
-        'access_token',
-        result.access_token,
-        this.getAccessCookieOptions(),
-      );
+      this.authCookieService.setAccessCookie(res, result.access_token);
     }
 
     if (result.refresh_token) {
-      res.cookie(
-        'refresh_token',
-        result.refresh_token,
-        this.getRefreshCookieOptions(),
-      );
+      this.authCookieService.setRefreshCookie(res, result.refresh_token);
     }
 
     return {
@@ -194,12 +135,13 @@ export class AuthController {
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.ADMIN, Role.WORKER, Role.RECRUITER)
   @HttpCode(HttpStatus.OK)
+  @ResponseMessage('Logged out successfully')
   async logout(
     @CurrentUser('id') userId: string,
     @Req() req: Request,
     @Res({ passthrough: true }) res: Response,
-  ) {
-    const refreshToken = req.cookies?.refresh_token as string | undefined;
+  ): Promise<void> {
+    const refreshToken = this.authCookieService.getRefreshToken(req);
     if (
       !refreshToken ||
       typeof refreshToken !== 'string' ||
@@ -208,14 +150,11 @@ export class AuthController {
       throw new UnauthorizedException('Refresh token is required');
     }
 
-    const result = await this.logoutUseCase.execute(userId, {
+    await this.logoutUseCase.execute(userId, {
       refresh_token: refreshToken,
     });
 
-    res.clearCookie('refresh_token', this.getClearCookieOptions());
-    res.clearCookie('access_token', this.getClearAccessCookieOptions());
-
-    return result;
+    this.authCookieService.clearAuthCookies(res);
   }
 
   @Get('me')

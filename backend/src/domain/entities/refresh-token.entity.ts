@@ -4,17 +4,23 @@ export class RefreshTokenEntity {
    * Deterministic SHA-256 hash (64 hex characters) of the raw refresh JWT.
    * Raw refresh tokens are never persisted to the database.
    */
-  token!: string;
+  tokenHash!: string;
   userId!: string;
   expiresAt!: Date;
   createdAt!: Date;
-  familyId!: string;
+  sessionId!: string;
   revokedAt: Date | null = null;
+  revokedReason: string | null = null;
 
   constructor(partial: Partial<RefreshTokenEntity>) {
-    Object.assign(this, partial);
+    if (partial) {
+      Object.assign(this, partial);
+    }
     if (this.revokedAt === undefined) {
       this.revokedAt = null;
+    }
+    if (this.revokedReason === undefined) {
+      this.revokedReason = null;
     }
   }
 }

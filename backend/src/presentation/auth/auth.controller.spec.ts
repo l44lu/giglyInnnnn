@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   NotFoundException,
+  HttpException,
 } from '@nestjs/common';
 import { AuthController } from './auth.controller';
 import { ILoginUseCase } from '../../application/use-cases/auth/interface/login.use-case.interface';
@@ -16,16 +17,19 @@ import { IVerifyPasswordResetOtpUseCase } from '../../application/use-cases/auth
 import { IResetPasswordUseCase } from '../../application/use-cases/auth/interface/reset-password.use-case.interface';
 import { IChangePasswordUseCase } from '../../application/use-cases/auth/interface/change-password.use-case.interface';
 import { IUserRepository } from '../../domain/repositories/user.repository.interface';
-import { JwtService } from '@nestjs/jwt';
+import { ITokenService } from '../../domain/services/token.service.interface';
 import { ConfigService } from '@nestjs/config';
 import { Role } from '../../domain/enums/role.enum';
 import { UserResponseDto } from '../../application/dto/user/user-response.dto';
 import { ChangePasswordInputDto } from '../../application/dto/auth/change-password-input.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
+import { RefreshRateLimitGuard } from '../guards/refresh-rate-limit.guard';
 import { ROLES_KEY } from '../decorators/roles.decorator';
+import { RESPONSE_MESSAGE_KEY } from '../decorators/response-message.decorator';
 import { Reflector } from '@nestjs/core';
 import type { Request, Response } from 'express';
+import { AuthCookieService } from './services/auth-cookie.service';
 
 describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', () => {
   let controller: AuthController;
@@ -99,8 +103,17 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
           provide: IUserRepository,
           useValue: { findById: jest.fn(), findByEmail: jest.fn() },
         },
-        { provide: JwtService, useValue: { verifyAsync: jest.fn() } },
+        {
+          provide: ITokenService,
+          useValue: {
+            verifyAccessToken: jest.fn(),
+            verifyRefreshToken: jest.fn(),
+            issueAccessToken: jest.fn(),
+            issueRefreshToken: jest.fn(),
+          },
+        },
         { provide: ConfigService, useValue: configService },
+        { provide: AuthCookieService, useClass: AuthCookieService },
       ],
     }).compile();
 
@@ -302,6 +315,36 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
       );
       expect(refreshUseCase.execute).not.toHaveBeenCalled();
     });
+
+    it('should have RefreshRateLimitGuard applied to POST /auth/refresh route handler', () => {
+      const guards = Reflect.getMetadata('__guards__', controller.refresh);
+      expect(guards).toBeDefined();
+      expect(guards).toContain(RefreshRateLimitGuard);
+    });
+
+    it('should not invoke refreshUseCase or touch cookies when rate limit guard rejects request with 429', () => {
+      RefreshRateLimitGuard.reset();
+      const guard = new RefreshRateLimitGuard();
+      const mockExecutionContext = {
+        switchToHttp: () => ({
+          getRequest: () => ({
+            ip: '198.51.100.77',
+            path: '/auth/refresh',
+          }),
+        }),
+      } as unknown as any;
+
+      // Exhaust limit of 15
+      for (let i = 0; i < 15; i++) {
+        expect(guard.canActivate(mockExecutionContext)).toBe(true);
+      }
+
+      // Exceeding request is rejected
+      expect(() => guard.canActivate(mockExecutionContext)).toThrow(
+        HttpException,
+      );
+      expect(refreshUseCase.execute).not.toHaveBeenCalled();
+    });
   });
 
   describe('POST /auth/logout', () => {
@@ -323,7 +366,7 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
 
       const result = await controller.logout('user-123', mockReq, mockRes);
 
-      expect(result).toEqual({ message: 'Logged out successfully' });
+      expect(result).toBeUndefined();
       expect(logoutUseCase.execute).toHaveBeenCalledWith('user-123', {
         refresh_token: 'active.refresh.token',
       });
@@ -354,6 +397,15 @@ describe('AuthController - /auth/login, /auth/refresh, /auth/logout, /auth/me', 
         controller.logout('user-123', mockReq, mockRes),
       ).rejects.toThrow(UnauthorizedException);
       expect(logoutUseCase.execute).not.toHaveBeenCalled();
+    });
+
+    it('should have @ResponseMessage("Logged out successfully") configured on logout handler', () => {
+      const reflector = new Reflector();
+      const message = reflector.get<string>(
+        RESPONSE_MESSAGE_KEY,
+        controller.logout,
+      );
+      expect(message).toBe('Logged out successfully');
     });
   });
 

@@ -8,6 +8,7 @@ import { RecruiterProfileController } from './presentation/recruiter/recruiter-p
 import { SkillsController } from './presentation/skills/skills.controller';
 import { AdminUserManagementController } from './presentation/admin/admin-user-management.controller';
 import { HealthController } from './presentation/health/health.controller';
+import { AuthCookieService } from './presentation/auth/services/auth-cookie.service';
 import { LoginUseCase } from './application/use-cases/auth/implementation/login.use-case';
 import { RefreshUseCase } from './application/use-cases/auth/implementation/refresh.use-case';
 import { SendOtpUseCase } from './application/use-cases/auth/implementation/send-otp.use-case';
@@ -49,6 +50,7 @@ import { RolesGuard } from './presentation/guards/roles.guard';
 import { PermissionsGuard } from './presentation/guards/permissions.guard';
 import { OtpRateLimitGuard } from './presentation/guards/otp-rate-limit.guard';
 import { LoginRateLimitGuard } from './presentation/guards/login-rate-limit.guard';
+import { RefreshRateLimitGuard } from './presentation/guards/refresh-rate-limit.guard';
 import { LoggerModule } from './infrastructure/logger/logger.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { IUserRepository } from './domain/repositories/user.repository.interface';
@@ -73,6 +75,8 @@ import { IOtpHashingService } from './domain/services/otp-hashing.service.interf
 import { OtpHashingService } from './infrastructure/crypto/otp-hashing.service';
 import { IRefreshTokenHashingService } from './domain/services/refresh-token-hashing.service.interface';
 import { RefreshTokenHashingService } from './infrastructure/crypto/refresh-token-hashing.service';
+import { ITokenService } from './domain/services/token.service.interface';
+import { JwtTokenService } from './infrastructure/security/jwt-token.service';
 import { IFileStorageService } from './domain/services/file-storage.service.interface';
 import { S3FileStorageService } from './infrastructure/storage/s3-file-storage.service';
 import { IRecruiterProfileRepository } from './domain/repositories/recruiter-profile.repository.interface';
@@ -212,6 +216,10 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
       useClass: RefreshTokenHashingService,
     },
     {
+      provide: ITokenService,
+      useClass: JwtTokenService,
+    },
+    {
       provide: IFileStorageService,
       useClass: S3FileStorageService,
     },
@@ -339,11 +347,13 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
       provide: IDeactivateAdminUserUseCase,
       useClass: DeactivateAdminUserUseCase,
     },
+    AuthCookieService,
     JwtAuthGuard,
     RolesGuard,
     PermissionsGuard,
     OtpRateLimitGuard,
     LoginRateLimitGuard,
+    RefreshRateLimitGuard,
     SecurityHeadersMiddleware,
   ],
 })

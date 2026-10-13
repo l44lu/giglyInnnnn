@@ -51,7 +51,10 @@ export class SetAdminUserBlockStatusUseCase implements ISetAdminUserBlockStatusU
 
     // 5. When blocking a user, revoke all active refresh tokens across all devices
     if (isBlocked) {
-      await this.refreshTokenRepository.revokeAllForUser(userId);
+      await this.refreshTokenRepository.revokeAllForUser(
+        userId,
+        'ADMIN_REVOKED',
+      );
     }
 
     // 6. Map to safe AdminUserResponseDto

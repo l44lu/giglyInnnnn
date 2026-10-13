@@ -2,8 +2,7 @@ import { Injectable, UnauthorizedException, Inject } from '@nestjs/common';
 import { IUserRepository } from '../../../../domain/repositories/user.repository.interface';
 import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { IRefreshTokenHashingService } from '../../../../domain/services/refresh-token-hashing.service.interface';
-import { JwtService, JwtSignOptions } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
+import { ITokenService } from '../../../../domain/services/token.service.interface';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 import { LoginInputDto } from '../../../dto/auth/login-input.dto';
@@ -14,23 +13,24 @@ import { ILoginUseCase } from '../interface/login.use-case.interface';
 @Injectable()
 export class LoginUseCase implements ILoginUseCase {
   constructor(
-    @Inject(IUserRepository) private userRepository: IUserRepository,
+    @Inject(IUserRepository) private readonly userRepository: IUserRepository,
     @Inject(IRefreshTokenRepository)
-    private refreshTokenRepository: IRefreshTokenRepository,
+    private readonly refreshTokenRepository: IRefreshTokenRepository,
     @Inject(IRefreshTokenHashingService)
-    private refreshTokenHashingService: IRefreshTokenHashingService,
-    private jwtService: JwtService,
-    private configService: ConfigService,
+    private readonly refreshTokenHashingService: IRefreshTokenHashingService,
+    @Inject(ITokenService)
+    private readonly tokenService: ITokenService,
   ) {}
 
   async execute(data: LoginInputDto): Promise<AuthResponseDto> {
-    // find user by email
+    // 1. Find user by email
     const user = await this.userRepository.findByEmail(data.email);
 
     if (!user) {
       throw new UnauthorizedException('Invalid credentials');
     }
-    // check if the password is valid
+
+    // 2. Check if the password is valid
     const isPasswordValid = await bcrypt.compare(
       data.password,
       user.passWordHash,
@@ -40,48 +40,42 @@ export class LoginUseCase implements ILoginUseCase {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Account status check (9.4): User must be active and not blocked
+    // 3. Account status check: User must be active and not blocked
     if (!user.canAuthenticate()) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // generate the token
-    const payload = { sub: user.id, email: user.email, role: user.role };
-    const access_token = await this.jwtService.signAsync(payload);
+    // 4. Issue access token through ITokenService
+    const access_token = await this.tokenService.issueAccessToken({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
 
-    // generate refresh token
-    const refresh_token = await this.jwtService.signAsync(
-      { sub: user.id },
-      {
-        secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        expiresIn: (this.configService.get<string>('JWT_REFRESH_EXPIRES_IN') ??
-          '7d') as JwtSignOptions['expiresIn'],
-        jwtid: crypto.randomUUID(),
-      },
+    // 5. Issue refresh token through ITokenService
+    const refreshTokenResult = await this.tokenService.issueRefreshToken({
+      sub: user.id,
+    });
+
+    // 6. Hash refresh token before database persistence (never store raw refresh JWT)
+    const tokenHash = this.refreshTokenHashingService.hash(
+      refreshTokenResult.token,
     );
 
-    // calculate expiration date from DB already mentioned in the .env but still gotta be sure uk :)
-    const expiresInDays = 7;
-    const expiresAt = new Date();
-    expiresAt.setDate(expiresAt.getDate() + expiresInDays);
+    // 7. Generate a new unique sessionId for this login session
+    const sessionId = crypto.randomUUID();
 
-    // Hash refresh token before database persistence (never store raw refresh JWT)
-    const tokenHash = this.refreshTokenHashingService.hash(refresh_token);
-
-    // Generate a new unique familyId for this login session
-    const familyId = crypto.randomUUID();
-
-    // save refresh token hash to db
+    // 8. Save refresh token hash, user ID, session ID, and token service expiry to DB
     await this.refreshTokenRepository.create({
-      token: tokenHash,
+      tokenHash,
       userId: user.id,
-      expiresAt,
-      familyId,
+      expiresAt: refreshTokenResult.expiresAt,
+      sessionId,
     });
 
     return {
       access_token,
-      refresh_token,
+      refresh_token: refreshTokenResult.token,
       user: UserMapper.toResponseDto(user),
     };
   }

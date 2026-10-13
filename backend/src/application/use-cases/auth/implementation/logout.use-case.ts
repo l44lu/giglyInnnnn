@@ -4,10 +4,13 @@ import {
   BadRequestException,
   Inject,
 } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
 import { IRefreshTokenRepository } from '../../../../domain/repositories/refresh-token.repository.interface';
 import { IRefreshTokenHashingService } from '../../../../domain/services/refresh-token-hashing.service.interface';
+import {
+  ITokenService,
+  InvalidTokenError,
+  RefreshTokenPayload,
+} from '../../../../domain/services/token.service.interface';
 import { LogoutInputDto } from '../../../dto/auth/logout-input.dto';
 import { ILogoutUseCase } from '../interface/logout.use-case.interface';
 
@@ -18,8 +21,8 @@ export class LogoutUseCase implements ILogoutUseCase {
     private readonly refreshTokenRepository: IRefreshTokenRepository,
     @Inject(IRefreshTokenHashingService)
     private readonly refreshTokenHashingService: IRefreshTokenHashingService,
-    private readonly jwtService: JwtService,
-    private readonly configService: ConfigService,
+    @Inject(ITokenService)
+    private readonly tokenService: ITokenService,
   ) {}
 
   async execute(
@@ -35,16 +38,14 @@ export class LogoutUseCase implements ILogoutUseCase {
       throw new BadRequestException('Refresh token is required');
     }
 
-    let payload: { sub: string };
+    let payload: RefreshTokenPayload;
     try {
-      payload = await this.jwtService.verifyAsync<{ sub: string }>(
-        data.refresh_token,
-        {
-          secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
-        },
-      );
-    } catch {
-      throw new UnauthorizedException('Invalid or expired refresh token');
+      payload = await this.tokenService.verifyRefreshToken(data.refresh_token);
+    } catch (error) {
+      if (error instanceof InvalidTokenError) {
+        throw new UnauthorizedException('Invalid or expired refresh token');
+      }
+      throw error;
     }
 
     // Hash the raw refresh token immediately (never persist or log raw tokens)
@@ -69,8 +70,11 @@ export class LogoutUseCase implements ILogoutUseCase {
       throw new UnauthorizedException('Invalid or revoked refresh token');
     }
 
-    // Revoke the entire refresh-token family
-    await this.refreshTokenRepository.revokeFamily(savedToken.familyId);
+    // Revoke the entire refresh-token session with LOGOUT reason
+    await this.refreshTokenRepository.revokeSession(
+      savedToken.sessionId,
+      'LOGOUT',
+    );
 
     return {
       message: 'Logged out successfully',
