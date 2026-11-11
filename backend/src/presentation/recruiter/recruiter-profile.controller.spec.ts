@@ -17,10 +17,12 @@ import { IUpdateRecruiterProfileUseCase } from '../../application/use-cases/recr
 import { IUpdateRecruiterPersonalProfileUseCase } from '../../application/use-cases/recruiter-profile/interface/update-recruiter-personal-profile.use-case.interface';
 import { IUploadRecruiterAvatarUseCase } from '../../application/use-cases/recruiter-profile/interface/upload-recruiter-avatar.use-case.interface';
 import { IGetRecruiterAvatarUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-avatar.use-case.interface';
+import { IRemoveRecruiterAvatarUseCase } from '../../application/use-cases/recruiter-profile/interface/remove-recruiter-avatar.use-case.interface';
 import { IGetRecruiterCompanyUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-company.use-case.interface';
 import { IUpdateRecruiterCompanyUseCase } from '../../application/use-cases/recruiter-profile/interface/update-recruiter-company.use-case.interface';
 import { IUploadRecruiterCompanyLogoUseCase } from '../../application/use-cases/recruiter-profile/interface/upload-recruiter-company-logo.use-case.interface';
 import { IGetRecruiterCompanyLogoUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-company-logo.use-case.interface';
+import { IRemoveRecruiterCompanyLogoUseCase } from '../../application/use-cases/recruiter-profile/interface/remove-recruiter-company-logo.use-case.interface';
 import { IUserRepository } from '../../domain/repositories/user.repository.interface';
 import { RecruiterProfileResponseDto } from '../../application/dto/recruiter-profile/recruiter-profile-response.dto';
 import { UpdateRecruiterProfileInputDto } from '../../application/dto/recruiter-profile/update-recruiter-profile-input.dto';
@@ -31,6 +33,7 @@ import { UserResponseDto } from '../../application/dto/user/user-response.dto';
 import { Role } from '../../domain/enums/role.enum';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { BYPASS_RESPONSE_WRAPPER_KEY } from '../decorators/bypass-response-wrapper.decorator';
+import { RESPONSE_MESSAGE_KEY } from '../decorators/response-message.decorator';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 
@@ -41,10 +44,12 @@ describe('RecruiterProfileController', () => {
   let updateRecruiterPersonalProfileUseCase: jest.Mocked<IUpdateRecruiterPersonalProfileUseCase>;
   let uploadRecruiterAvatarUseCase: jest.Mocked<IUploadRecruiterAvatarUseCase>;
   let getRecruiterAvatarUseCase: jest.Mocked<IGetRecruiterAvatarUseCase>;
+  let removeRecruiterAvatarUseCase: jest.Mocked<IRemoveRecruiterAvatarUseCase>;
   let getRecruiterCompanyUseCase: jest.Mocked<IGetRecruiterCompanyUseCase>;
   let updateRecruiterCompanyUseCase: jest.Mocked<IUpdateRecruiterCompanyUseCase>;
   let uploadRecruiterCompanyLogoUseCase: jest.Mocked<IUploadRecruiterCompanyLogoUseCase>;
   let getRecruiterCompanyLogoUseCase: jest.Mocked<IGetRecruiterCompanyLogoUseCase>;
+  let removeRecruiterCompanyLogoUseCase: jest.Mocked<IRemoveRecruiterCompanyLogoUseCase>;
   let reflector: Reflector;
 
   const mockResponseDto = new RecruiterProfileResponseDto({
@@ -103,6 +108,10 @@ describe('RecruiterProfileController', () => {
       execute: jest.fn(),
     };
 
+    removeRecruiterAvatarUseCase = {
+      execute: jest.fn(),
+    };
+
     getRecruiterCompanyUseCase = {
       execute: jest.fn(),
     };
@@ -116,6 +125,10 @@ describe('RecruiterProfileController', () => {
     };
 
     getRecruiterCompanyLogoUseCase = {
+      execute: jest.fn(),
+    };
+
+    removeRecruiterCompanyLogoUseCase = {
       execute: jest.fn(),
     };
 
@@ -143,6 +156,10 @@ describe('RecruiterProfileController', () => {
           useValue: getRecruiterAvatarUseCase,
         },
         {
+          provide: IRemoveRecruiterAvatarUseCase,
+          useValue: removeRecruiterAvatarUseCase,
+        },
+        {
           provide: IGetRecruiterCompanyUseCase,
           useValue: getRecruiterCompanyUseCase,
         },
@@ -157,6 +174,10 @@ describe('RecruiterProfileController', () => {
         {
           provide: IGetRecruiterCompanyLogoUseCase,
           useValue: getRecruiterCompanyLogoUseCase,
+        },
+        {
+          provide: IRemoveRecruiterCompanyLogoUseCase,
+          useValue: removeRecruiterCompanyLogoUseCase,
         },
         {
           provide: IUserRepository,
@@ -220,6 +241,40 @@ describe('RecruiterProfileController', () => {
       );
       expect(isAvatarBypassed).toBe(true);
       expect(isCompanyLogoBypassed).toBe(true);
+    });
+
+    it('should have effective @Roles(Role.RECRUITER) inherited on removeAvatar handler', () => {
+      const roles = reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+        controller.removeAvatar,
+        RecruiterProfileController,
+      ]);
+      expect(roles).toBeDefined();
+      expect(roles).toEqual([Role.RECRUITER]);
+    });
+
+    it('should have @ResponseMessage("Avatar removed successfully") configured on removeAvatar handler', () => {
+      const message = reflector.get<string>(
+        RESPONSE_MESSAGE_KEY,
+        controller.removeAvatar,
+      );
+      expect(message).toBe('Avatar removed successfully');
+    });
+
+    it('should have effective @Roles(Role.RECRUITER) inherited on removeCompanyLogo handler', () => {
+      const roles = reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+        controller.removeCompanyLogo,
+        RecruiterProfileController,
+      ]);
+      expect(roles).toBeDefined();
+      expect(roles).toEqual([Role.RECRUITER]);
+    });
+
+    it('should have @ResponseMessage("Company logo removed successfully") configured on removeCompanyLogo handler', () => {
+      const message = reflector.get<string>(
+        RESPONSE_MESSAGE_KEY,
+        controller.removeCompanyLogo,
+      );
+      expect(message).toBe('Company logo removed successfully');
     });
   });
 
@@ -422,6 +477,31 @@ describe('RecruiterProfileController', () => {
         'private, max-age=3600',
       );
       expect(mockResponse.send).toHaveBeenCalledWith(mockFileResult.buffer);
+    });
+  });
+
+  describe('DELETE /recruiter/profile/avatar', () => {
+    it('should forward authenticated user ID to removeRecruiterAvatarUseCase and return { avatarUrl: null }', async () => {
+      removeRecruiterAvatarUseCase.execute.mockResolvedValueOnce({
+        avatarUrl: null,
+      });
+
+      const result = await controller.removeAvatar('recruiter-user-123');
+
+      expect(result).toEqual({ avatarUrl: null });
+      expect(removeRecruiterAvatarUseCase.execute).toHaveBeenCalledWith(
+        'recruiter-user-123',
+      );
+    });
+
+    it('should propagate use case errors to the presentation caller', async () => {
+      removeRecruiterAvatarUseCase.execute.mockRejectedValueOnce(
+        new NotFoundException('User not found'),
+      );
+
+      await expect(
+        controller.removeAvatar('non-existent-user'),
+      ).rejects.toThrow(NotFoundException);
     });
   });
 
@@ -697,6 +777,43 @@ describe('RecruiterProfileController', () => {
     });
   });
 
+  describe('DELETE /recruiter/company/logo', () => {
+    it('should forward authenticated user ID to removeRecruiterCompanyLogoUseCase and return { logoUrl: null }', async () => {
+      removeRecruiterCompanyLogoUseCase.execute.mockResolvedValueOnce({
+        logoUrl: null,
+      });
+
+      const result = await controller.removeCompanyLogo('recruiter-user-123');
+
+      expect(result).toEqual({ logoUrl: null });
+      expect(removeRecruiterCompanyLogoUseCase.execute).toHaveBeenCalledWith(
+        'recruiter-user-123',
+      );
+    });
+
+    it('should propagate NotFoundException when company is not configured for recruiter', async () => {
+      removeRecruiterCompanyLogoUseCase.execute.mockRejectedValueOnce(
+        new NotFoundException(
+          'Company profile not configured for this recruiter',
+        ),
+      );
+
+      await expect(
+        controller.removeCompanyLogo('recruiter-user-123'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('should propagate use case errors to the presentation caller', async () => {
+      removeRecruiterCompanyLogoUseCase.execute.mockRejectedValueOnce(
+        new Error('Database error'),
+      );
+
+      await expect(
+        controller.removeCompanyLogo('recruiter-user-123'),
+      ).rejects.toThrow('Database error');
+    });
+  });
+
   describe('Part 12 — Security & RBAC Guard Evaluation', () => {
     let rolesGuard: RolesGuard;
 
@@ -927,6 +1044,77 @@ describe('RecruiterProfileController', () => {
 
     it('RECRUITER: GET /recruiter/company/logo -> allowed (returns true)', () => {
       const context = createMockContext(controller.getCompanyLogo, {
+        id: 'recruiter-uuid-1',
+        email: 'recruiter@example.com',
+        role: Role.RECRUITER,
+      });
+      expect(rolesGuard.canActivate(context)).toBe(true);
+    });
+
+    it('No authentication: DELETE /recruiter/profile/avatar -> throws UnauthorizedException (401)', () => {
+      const context = createMockContext(controller.removeAvatar, undefined);
+      expect(() => rolesGuard.canActivate(context)).toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('WORKER: DELETE /recruiter/profile/avatar -> throws ForbiddenException (403)', () => {
+      const context = createMockContext(controller.removeAvatar, {
+        id: 'worker-uuid-1',
+        email: 'worker@example.com',
+        role: Role.WORKER,
+      });
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('ADMIN: DELETE /recruiter/profile/avatar -> throws ForbiddenException (403)', () => {
+      const context = createMockContext(controller.removeAvatar, {
+        id: 'admin-uuid-1',
+        email: 'admin@example.com',
+        role: Role.ADMIN,
+      });
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('RECRUITER: DELETE /recruiter/profile/avatar -> allowed (returns true)', () => {
+      const context = createMockContext(controller.removeAvatar, {
+        id: 'recruiter-uuid-1',
+        email: 'recruiter@example.com',
+        role: Role.RECRUITER,
+      });
+      expect(rolesGuard.canActivate(context)).toBe(true);
+    });
+
+    it('No authentication: DELETE /recruiter/company/logo -> throws UnauthorizedException (401)', () => {
+      const context = createMockContext(
+        controller.removeCompanyLogo,
+        undefined,
+      );
+      expect(() => rolesGuard.canActivate(context)).toThrow(
+        UnauthorizedException,
+      );
+    });
+
+    it('WORKER: DELETE /recruiter/company/logo -> throws ForbiddenException (403)', () => {
+      const context = createMockContext(controller.removeCompanyLogo, {
+        id: 'worker-uuid-1',
+        email: 'worker@example.com',
+        role: Role.WORKER,
+      });
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('ADMIN: DELETE /recruiter/company/logo -> throws ForbiddenException (403)', () => {
+      const context = createMockContext(controller.removeCompanyLogo, {
+        id: 'admin-uuid-1',
+        email: 'admin@example.com',
+        role: Role.ADMIN,
+      });
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('RECRUITER: DELETE /recruiter/company/logo -> allowed (returns true)', () => {
+      const context = createMockContext(controller.removeCompanyLogo, {
         id: 'recruiter-uuid-1',
         email: 'recruiter@example.com',
         role: Role.RECRUITER,

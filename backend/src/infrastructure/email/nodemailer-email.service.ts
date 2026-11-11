@@ -52,9 +52,9 @@ export class NodemailerEmailService implements IEmailService {
 
     try {
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(`OTP email sent to ${email} ${otp}`);
+      this.logger.log(`the otp is ${otp}`);
     } catch (error) {
-      this.logger.error(`Failed to send OTP email to ${email} `, error);
+      this.logger.error('Failed to send OTP email', error);
       throw error;
     }
   }
@@ -91,12 +91,9 @@ export class NodemailerEmailService implements IEmailService {
 
     try {
       await this.transporter.sendMail(mailOptions);
-      this.logger.log(`Password reset OTP email sent to ${email} ${otp}`);
+      this.logger.log(`the otp is ${otp}`);
     } catch (error) {
-      this.logger.error(
-        `Failed to send password reset OTP email to ${email} `,
-        error,
-      );
+      this.logger.error('Failed to send password reset OTP email', error);
       throw error;
     }
   }

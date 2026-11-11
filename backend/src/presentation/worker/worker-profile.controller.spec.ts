@@ -17,6 +17,7 @@ import { IUpdateWorkerProfileUseCase } from '../../application/use-cases/worker-
 import { IUpdateWorkerPersonalProfileUseCase } from '../../application/use-cases/worker-profile/interface/update-worker-personal-profile.use-case.interface';
 import { IUploadWorkerAvatarUseCase } from '../../application/use-cases/worker-profile/interface/upload-worker-avatar.use-case.interface';
 import { IGetWorkerAvatarUseCase } from '../../application/use-cases/worker-profile/interface/get-worker-avatar.use-case.interface';
+import { IRemoveWorkerAvatarUseCase } from '../../application/use-cases/worker-profile/interface/remove-worker-avatar.use-case.interface';
 import { IUserRepository } from '../../domain/repositories/user.repository.interface';
 import { WorkerProfileResponseDto } from '../../application/dto/worker-profile/worker-profile-response.dto';
 import { UpdateWorkerProfileInputDto } from '../../application/dto/worker-profile/update-worker-profile-input.dto';
@@ -25,6 +26,7 @@ import { UserResponseDto } from '../../application/dto/user/user-response.dto';
 import { Role } from '../../domain/enums/role.enum';
 import { ROLES_KEY } from '../decorators/roles.decorator';
 import { BYPASS_RESPONSE_WRAPPER_KEY } from '../decorators/bypass-response-wrapper.decorator';
+import { RESPONSE_MESSAGE_KEY } from '../decorators/response-message.decorator';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { RolesGuard } from '../guards/roles.guard';
 
@@ -35,6 +37,7 @@ describe('WorkerProfileController', () => {
   let updateWorkerPersonalProfileUseCase: jest.Mocked<IUpdateWorkerPersonalProfileUseCase>;
   let uploadWorkerAvatarUseCase: jest.Mocked<IUploadWorkerAvatarUseCase>;
   let getWorkerAvatarUseCase: jest.Mocked<IGetWorkerAvatarUseCase>;
+  let removeWorkerAvatarUseCase: jest.Mocked<IRemoveWorkerAvatarUseCase>;
   let reflector: Reflector;
 
   const mockResponseDto = new WorkerProfileResponseDto({
@@ -83,6 +86,10 @@ describe('WorkerProfileController', () => {
       execute: jest.fn(),
     };
 
+    removeWorkerAvatarUseCase = {
+      execute: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       controllers: [WorkerProfileController],
       providers: [
@@ -105,6 +112,10 @@ describe('WorkerProfileController', () => {
         {
           provide: IGetWorkerAvatarUseCase,
           useValue: getWorkerAvatarUseCase,
+        },
+        {
+          provide: IRemoveWorkerAvatarUseCase,
+          useValue: removeWorkerAvatarUseCase,
         },
         {
           provide: IUserRepository,
@@ -182,6 +193,23 @@ describe('WorkerProfileController', () => {
         controller.getAvatar,
       );
       expect(isBypassed).toBe(true);
+    });
+
+    it('should have effective @Roles(Role.WORKER) inherited on removeAvatar handler', () => {
+      const roles = reflector.getAllAndOverride<Role[]>(ROLES_KEY, [
+        controller.removeAvatar,
+        WorkerProfileController,
+      ]);
+      expect(roles).toBeDefined();
+      expect(roles).toEqual([Role.WORKER]);
+    });
+
+    it('should have @ResponseMessage("Avatar removed successfully") configured on removeAvatar handler', () => {
+      const message = reflector.get<string>(
+        RESPONSE_MESSAGE_KEY,
+        controller.removeAvatar,
+      );
+      expect(message).toBe('Avatar removed successfully');
     });
 
     it('should apply JwtAuthGuard and RolesGuard to the controller class', () => {
@@ -411,6 +439,31 @@ describe('WorkerProfileController', () => {
     });
   });
 
+  describe('DELETE /worker/profile/avatar', () => {
+    it('should forward authenticated user ID to removeWorkerAvatarUseCase and return { avatarUrl: null }', async () => {
+      removeWorkerAvatarUseCase.execute.mockResolvedValueOnce({
+        avatarUrl: null,
+      });
+
+      const result = await controller.removeAvatar('worker-user-123');
+
+      expect(result).toEqual({ avatarUrl: null });
+      expect(removeWorkerAvatarUseCase.execute).toHaveBeenCalledWith(
+        'worker-user-123',
+      );
+    });
+
+    it('should propagate use case errors to the presentation caller', async () => {
+      removeWorkerAvatarUseCase.execute.mockRejectedValueOnce(
+        new NotFoundException('User not found'),
+      );
+
+      await expect(
+        controller.removeAvatar('non-existent-user'),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   describe('Part 12 — Security & RBAC Guard Evaluation', () => {
     let rolesGuard: RolesGuard;
 
@@ -455,6 +508,13 @@ describe('WorkerProfileController', () => {
       );
     });
 
+    it('No authentication: DELETE /worker/profile/avatar -> throws UnauthorizedException (401)', () => {
+      const context = createMockContext(controller.removeAvatar, undefined);
+      expect(() => rolesGuard.canActivate(context)).toThrow(
+        UnauthorizedException,
+      );
+    });
+
     it('RECRUITER: POST /worker/profile/avatar -> throws ForbiddenException (403)', () => {
       const context = createMockContext(controller.uploadAvatar, {
         id: 'recruiter-uuid-1',
@@ -466,6 +526,15 @@ describe('WorkerProfileController', () => {
 
     it('RECRUITER: GET /worker/profile/avatar -> throws ForbiddenException (403)', () => {
       const context = createMockContext(controller.getAvatar, {
+        id: 'recruiter-uuid-1',
+        email: 'recruiter@example.com',
+        role: Role.RECRUITER,
+      });
+      expect(() => rolesGuard.canActivate(context)).toThrow(ForbiddenException);
+    });
+
+    it('RECRUITER: DELETE /worker/profile/avatar -> throws ForbiddenException (403)', () => {
+      const context = createMockContext(controller.removeAvatar, {
         id: 'recruiter-uuid-1',
         email: 'recruiter@example.com',
         role: Role.RECRUITER,
@@ -493,6 +562,15 @@ describe('WorkerProfileController', () => {
 
     it('WORKER: GET /worker/profile/avatar -> allowed (returns true)', () => {
       const context = createMockContext(controller.getAvatar, {
+        id: 'worker-uuid-1',
+        email: 'worker@example.com',
+        role: Role.WORKER,
+      });
+      expect(rolesGuard.canActivate(context)).toBe(true);
+    });
+
+    it('WORKER: DELETE /worker/profile/avatar -> allowed (returns true)', () => {
+      const context = createMockContext(controller.removeAvatar, {
         id: 'worker-uuid-1',
         email: 'worker@example.com',
         role: Role.WORKER,

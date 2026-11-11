@@ -8,6 +8,13 @@ import type {
   UpdateWorkerSkillsPayload,
 } from "@/types/worker-profile";
 import type { User } from "@/types/auth";
+import type {
+  FindJobsQuery,
+  FindJobsResponse,
+  WorkerJobDetails,
+  ReportJobInput,
+  ReportJobResponse,
+} from "@/types/job";
 
 export interface UpdateWorkerPersonalProfilePayload {
   firstName?: string;
@@ -235,6 +242,19 @@ export const uploadWorkerAvatar = async (
 };
 
 /**
+ * Removes the authenticated worker's profile avatar image.
+ * Dispatches DELETE /worker/profile/avatar with HttpOnly credentials.
+ * The backend identity is derived from the authenticated session.
+ * Returns the response containing { avatarUrl: null }.
+ */
+export const removeWorkerAvatar = async (): Promise<{ avatarUrl: null }> => {
+  const response = await api.delete<{ avatarUrl: null }>(
+    "/worker/profile/avatar",
+  );
+  return response.data;
+};
+
+/**
  * Fetches the authenticated worker's profile avatar image as a Blob using the configured Axios client.
  * Inherits withCredentials: true and single-flight 401 token-refresh interceptors from api.
  * Accepts an optional avatarVersion (string or number) to bypass browser caching when updated.
@@ -256,4 +276,190 @@ export const fetchWorkerAvatarBlob = async (
     }
     throw error;
   }
+};
+
+/**
+ * Formats and normalizes query parameters for GET /worker/jobs:
+ * - Omits undefined, null, and empty string filters.
+ * - Preserves valid numeric values, including 0 (e.g. minPay: 0, maxPay: 0).
+ * - Preserves numeric page and limit.
+ * - Serializes skillIds as a comma-separated string, avoiding Axios bracket notation ("skillIds[]").
+ */
+export const formatFindJobsParams = (
+  query?: FindJobsQuery,
+): Record<string, string | number> | undefined => {
+  if (!query) return undefined;
+
+  const params: Record<string, string | number> = {};
+
+  if (typeof query.search === "string" && query.search.trim().length > 0) {
+    params.search = query.search.trim();
+  }
+
+  if (
+    typeof query.categoryId === "string" &&
+    query.categoryId.trim().length > 0
+  ) {
+    params.categoryId = query.categoryId.trim();
+  }
+
+  if (
+    query.workType &&
+    typeof query.workType === "string" &&
+    query.workType.trim().length > 0
+  ) {
+    params.workType = query.workType;
+  }
+
+  if (typeof query.location === "string" && query.location.trim().length > 0) {
+    params.location = query.location.trim();
+  }
+
+  if (
+    query.paymentStructure &&
+    typeof query.paymentStructure === "string" &&
+    query.paymentStructure.trim().length > 0
+  ) {
+    params.paymentStructure = query.paymentStructure;
+  }
+
+  if (typeof query.minPay === "number" && !isNaN(query.minPay)) {
+    params.minPay = query.minPay;
+  }
+
+  if (typeof query.maxPay === "number" && !isNaN(query.maxPay)) {
+    params.maxPay = query.maxPay;
+  }
+
+  if (Array.isArray(query.skillIds) && query.skillIds.length > 0) {
+    const cleanSkills = query.skillIds
+      .map((id) => (typeof id === "string" ? id.trim() : ""))
+      .filter((id) => id.length > 0);
+    if (cleanSkills.length > 0) {
+      params.skillIds = cleanSkills.join(",");
+    }
+  }
+
+  if (
+    query.sortBy &&
+    typeof query.sortBy === "string" &&
+    query.sortBy.trim().length > 0
+  ) {
+    params.sortBy = query.sortBy;
+  }
+
+  if (typeof query.page === "number" && !isNaN(query.page)) {
+    params.page = query.page;
+  }
+
+  if (typeof query.limit === "number" && !isNaN(query.limit)) {
+    params.limit = query.limit;
+  }
+
+  return Object.keys(params).length > 0 ? params : undefined;
+};
+
+/**
+ * Fetches open jobs for worker job discovery with filtering, search, and pagination.
+ * Dispatches GET /worker/jobs with HttpOnly credentials.
+ * Automatically unwrapped by the api response interceptor.
+ */
+export const findOpenJobs = async (
+  query?: FindJobsQuery,
+): Promise<FindJobsResponse> => {
+  const params = formatFindJobsParams(query);
+  const response = await api.get<FindJobsResponse>("/worker/jobs", {
+    ...(params ? { params } : {}),
+  });
+  return response.data;
+};
+
+/**
+ * Fetches the full public details of a single open job post for worker discovery.
+ * Dispatches GET /worker/jobs/:id with HttpOnly credentials.
+ * Automatically unwrapped by the api response interceptor.
+ */
+export const getWorkerJobDetails = async (
+  id: string,
+): Promise<WorkerJobDetails> => {
+  const cleanId = id.trim();
+  const response = await api.get<WorkerJobDetails>(
+    `/worker/jobs/${encodeURIComponent(cleanId)}`,
+  );
+  return response.data;
+};
+
+export const ALLOWED_REPORT_EVIDENCE_MIME_TYPES = [
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "application/pdf",
+];
+
+export const ALLOWED_REPORT_EVIDENCE_EXTENSIONS = [
+  ".jpg",
+  ".jpeg",
+  ".png",
+  ".webp",
+  ".pdf",
+];
+
+export const MAX_REPORT_EVIDENCE_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+export const MAX_REPORT_DESCRIPTION_LENGTH = 500;
+
+/**
+ * Validates selected report evidence file against MIME types, file extensions, and size constraints.
+ * Returns an error message string if invalid, or null if valid.
+ */
+export const validateReportEvidenceFile = (file: {
+  name?: string;
+  type?: string;
+  size: number;
+}): string | null => {
+  if (file.size > MAX_REPORT_EVIDENCE_FILE_SIZE) {
+    return "Evidence file exceeds the 5MB upload limit.";
+  }
+  const typeMatches = Boolean(
+    file.type &&
+    ALLOWED_REPORT_EVIDENCE_MIME_TYPES.includes(file.type.toLowerCase()),
+  );
+  const extMatches = Boolean(
+    file.name &&
+    ALLOWED_REPORT_EVIDENCE_EXTENSIONS.some((ext) =>
+      file.name!.toLowerCase().endsWith(ext),
+    ),
+  );
+  if (!typeMatches && !extMatches) {
+    return "Unsupported file type. Please upload a JPEG, PNG, WebP, or PDF file.";
+  }
+  return null;
+};
+
+/**
+ * Submits a report for a specific job post with an issue description and optional evidence file.
+ * Dispatches POST /worker/jobs/:id/report as multipart/form-data.
+ * Content-Type is left undefined so Axios and browser construct boundary automatically.
+ * Automatically unwrapped by api response interceptor.
+ */
+export const reportJob = async (
+  jobId: string,
+  input: ReportJobInput,
+): Promise<ReportJobResponse> => {
+  const cleanId = jobId.trim();
+  const formData = new FormData();
+  formData.append("description", input.description.trim());
+  if (input.evidence) {
+    formData.append("evidence", input.evidence);
+  }
+
+  const response = await api.post<ReportJobResponse>(
+    `/worker/jobs/${encodeURIComponent(cleanId)}/report`,
+    formData,
+    {
+      headers: {
+        "Content-Type": undefined,
+      },
+    },
+  );
+  return response.data;
 };

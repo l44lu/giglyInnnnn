@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import { RecruiterSidebar } from "@/components/recruiter/RecruiterSidebar";
 import { RecruiterHeroCards } from "@/components/recruiter/RecruiterHeroCards";
@@ -7,6 +8,8 @@ import { RecruiterRecentActivity } from "@/components/recruiter/RecruiterRecentA
 import { TopCandidates } from "@/components/recruiter/TopCandidates";
 
 export const RecruiterDashboard: React.FC = () => {
+  const navigate = useNavigate();
+
   return (
     <div className="flex min-h-screen bg-white text-slate-900 antialiased font-sans">
       {/* Left Sidebar */}
@@ -38,7 +41,11 @@ export const RecruiterDashboard: React.FC = () => {
           </div>
 
           {/* Action Cards (Need to hire talent? / Looking for specific skills?) */}
-          <RecruiterHeroCards />
+          <RecruiterHeroCards
+            onPostJob={() => {
+              void navigate("/recruiter/post-job");
+            }}
+          />
 
           {/* Stats / Metric Cards */}
           <RecruiterStatsCards

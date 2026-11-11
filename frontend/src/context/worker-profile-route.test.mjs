@@ -294,7 +294,7 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
       assert.doesNotMatch(statsContent, />12</, "Must not contain fake 12 clients");
     });
 
-    test("4.6. WorkerProfile renders Personal Information card with fields and Update action", () => {
+    test("4.6. WorkerProfile renders Personal Information card with fields and controlled props", () => {
       const content = fs.readFileSync(profilePath, "utf-8");
       assert.match(
         content,
@@ -307,10 +307,15 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
         /Personal information/,
         "Must render 'Personal information' card title",
       );
+      const headerPath = path.resolve(
+        __dirname,
+        "../components/worker/WorkerProfileHeader.tsx",
+      );
+      const headerContent = fs.readFileSync(headerPath, "utf-8");
       assert.match(
-        personalContent,
-        /Update/,
-        "Must render 'Update' action",
+        headerContent,
+        /aria-label=["']Edit Details["']/,
+        "Must provide unified 'Edit Details' action in WorkerProfileHeader",
       );
       assert.match(personalContent, /FULL NAME/, "Must render FULL NAME field");
       assert.match(personalContent, /EMAIL/, "Must render EMAIL field");
@@ -650,17 +655,18 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
       );
       const personalContent = fs.readFileSync(personalPath, "utf-8");
 
-      // Verify imports and hook bindings in WorkerPersonalInfoCard
-      assert.match(personalContent, /updateWorkerPersonalProfile/);
-      assert.match(personalContent, /refreshUser/);
-      assert.match(personalContent, /isEditingPersonal/);
-      assert.match(personalContent, /isSavingPersonal/);
-      assert.match(personalContent, /personalError/);
+      // Verify imports and hook bindings in WorkerProfile
+      assert.match(content, /updateWorkerPersonalProfile/);
+      assert.match(content, /refreshUser/);
+      assert.match(content, /isEditingDetails/);
+      assert.match(content, /isSavingDetails/);
+      assert.match(personalContent, /isEditingDetails/);
+      assert.match(personalContent, /isSavingDetails/);
 
-      // Verify button controls
-      assert.match(personalContent, /aria-label=["']Update personal information["']/);
-      assert.match(personalContent, /aria-label=["']Cancel personal information editing["']/);
-      assert.match(personalContent, /aria-label=["']Save personal information["']/);
+      // Verify card-level independent controls are removed in favor of unified page header
+      assert.doesNotMatch(personalContent, /aria-label=["']Update personal information["']/);
+      assert.doesNotMatch(personalContent, /aria-label=["']Cancel personal information editing["']/);
+      assert.doesNotMatch(personalContent, /aria-label=["']Save personal information["']/);
 
       // Verify email remains read-only
       assert.match(
@@ -951,7 +957,7 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
       // Verify header action buttons
       assert.match(headerContent, /aria-label=["']Edit Details["']/);
       assert.match(headerContent, /aria-label=["']Cancel editing details["']/);
-      assert.match(headerContent, /aria-label=["']Save details["']/);
+      assert.match(headerContent, /aria-label=["']Save (details|changes)["']/i);
 
       const overviewPath = path.resolve(
         __dirname,
@@ -1175,7 +1181,7 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
       assert.strictEqual(fetchCount, 1, "Duplicate retry invocation must be suppressed");
     });
 
-    test("8.2. Independent saving states: isSavingPersonal and isSavingDetails operate independently without state collision", () => {
+    test("8.2. Unified saving state: isSavingDetails controls saving across profile and child cards", () => {
       const content = fs.readFileSync(profilePath, "utf-8");
       const personalPath = path.resolve(
         __dirname,
@@ -1183,49 +1189,35 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
       );
       const personalContent = fs.readFileSync(personalPath, "utf-8");
 
-      assert.match(personalContent, /isSavingPersonal/);
+      assert.match(personalContent, /isSavingDetails/);
       assert.match(content, /isSavingDetails/);
 
-      // State simulation verifying independence
-      let isSavingPersonal = false;
+      // State simulation verifying unified disabled state during save
       let isSavingDetails = false;
       let personalControlsDisabled = false;
       let professionalControlsDisabled = false;
 
-      // Start saving personal
-      isSavingPersonal = true;
-      personalControlsDisabled = isSavingPersonal;
-      professionalControlsDisabled = isSavingDetails;
-
-      assert.strictEqual(personalControlsDisabled, true, "Personal controls disabled during personal save");
-      assert.strictEqual(professionalControlsDisabled, false, "Professional controls remain active during personal save");
-
-      // Complete personal save
-      isSavingPersonal = false;
-
-      // Start saving professional
+      // Start unified save
       isSavingDetails = true;
-      personalControlsDisabled = isSavingPersonal;
+      personalControlsDisabled = isSavingDetails;
       professionalControlsDisabled = isSavingDetails;
 
-      assert.strictEqual(personalControlsDisabled, false, "Personal controls remain active during professional save");
-      assert.strictEqual(professionalControlsDisabled, true, "Professional controls disabled during professional save");
+      assert.strictEqual(personalControlsDisabled, true, "Personal controls disabled during save");
+      assert.strictEqual(professionalControlsDisabled, true, "Professional controls disabled during save");
+
+      // Complete save
+      isSavingDetails = false;
+      personalControlsDisabled = isSavingDetails;
+      professionalControlsDisabled = isSavingDetails;
+
+      assert.strictEqual(personalControlsDisabled, false, "Personal controls active when save completes");
+      assert.strictEqual(professionalControlsDisabled, false, "Professional controls active when save completes");
     });
 
     test("8.3. Duplicate submission prevention: save handlers reject execution when save is already in-flight", async () => {
       const content = fs.readFileSync(profilePath, "utf-8");
-      const personalPath = path.resolve(
-        __dirname,
-        "../components/worker/WorkerPersonalInfoCard.tsx",
-      );
-      const personalContent = fs.readFileSync(personalPath, "utf-8");
 
-      // Verify both handlers check their respective saving flags
-      assert.match(
-        personalContent,
-        /const\s+handleSavePersonal\s*=\s*async\s*\(\)\s*=>\s*\{[\s\S]*?if\s*\(\s*isSavingPersonal\s*\)\s*return/,
-        "handleSavePersonal must check isSavingPersonal to guard against duplicate dispatch",
-      );
+      // Verify unified handler checks saving flag
       assert.match(
         content,
         /const\s+handleSaveDetails\s*=\s*async\s*\(\)\s*=>\s*\{[\s\S]*?if\s*\(\s*isSavingDetails\s*\)\s*return/,
@@ -1311,24 +1303,14 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
         "WorkerProfile must import SweetAlert2 for notifications",
       );
       assert.match(
-        personalContent,
-        /import\s+Swal\s+from\s+["']sweetalert2["']/,
-        "WorkerPersonalInfoCard must import SweetAlert2 for notifications",
-      );
-      assert.match(
         content,
         /Swal\.mixin\(\s*\{[\s\S]*?toast:\s*true[\s\S]*?position:\s*["']top-end["']/,
         "WorkerProfile must configure a non-intrusive toast notification",
       );
       assert.match(
-        personalContent,
-        /Toast\.fire\(\s*\{[\s\S]*?icon:\s*["']success["'][\s\S]*?Personal information updated successfully/,
-        "Must trigger success toast upon successful personal profile update",
-      );
-      assert.match(
         content,
-        /Toast\.fire\(\s*\{[\s\S]*?icon:\s*["']success["'][\s\S]*?Professional profile updated successfully/,
-        "Must trigger success toast upon successful professional profile update",
+        /Toast\.fire\(\s*\{[\s\S]*?icon:\s*["']success["'][\s\S]*?Profile updated successfully/,
+        "Must trigger success toast upon successful unified profile update",
       );
     });
 
@@ -1421,10 +1403,10 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
         /<WorkerSkillsCard\b/,
         "WorkerProfile must render WorkerSkillsCard",
       );
+      assert.match(content, /getSkillCatalog/);
+      assert.match(content, /getWorkerSkills/);
+      assert.match(content, /updateWorkerSkills/);
       const skillsContent = fs.readFileSync(skillsCardPath, "utf-8");
-      assert.match(skillsContent, /getSkillCatalog/);
-      assert.match(skillsContent, /getWorkerSkills/);
-      assert.match(skillsContent, /updateWorkerSkills/);
       assert.match(skillsContent, /Skill/);
       assert.match(skillsContent, /WorkerSkill/);
     });
@@ -1509,13 +1491,21 @@ describe("Step 2D: Worker Profile Route & Navigation Foundation", () => {
       );
     });
 
-    test("9.7. Edit skills controls: Edit, Cancel, Save buttons with proper accessibility labels", () => {
+    test("9.7. Edit skills controls: Select and Add controls in WorkerSkillsCard, with card-level buttons removed in favor of unified header", () => {
       const skillsContent = fs.readFileSync(skillsCardPath, "utf-8");
-      assert.match(skillsContent, /aria-label=["']Edit skills["']/);
-      assert.match(skillsContent, /aria-label=["']Cancel skills editing["']/);
-      assert.match(skillsContent, /aria-label=["']Save skills["']/);
       assert.match(skillsContent, /aria-label=["']Select skill to add["']/);
       assert.match(skillsContent, /aria-label=["']Add skill["']/);
+      assert.doesNotMatch(skillsContent, /aria-label=["']Edit skills["']/);
+      assert.doesNotMatch(skillsContent, /aria-label=["']Save skills["']/);
+
+      const headerPath = path.resolve(
+        __dirname,
+        "../components/worker/WorkerProfileHeader.tsx",
+      );
+      const headerContent = fs.readFileSync(headerPath, "utf-8");
+      assert.match(headerContent, /aria-label=["']Edit Details["']/);
+      assert.match(headerContent, /aria-label=["']Save (details|changes)["']/i);
+      assert.match(headerContent, /aria-label=["']Cancel editing details["']/);
     });
 
     test("9.8. Duplicate prevention: availableCatalogOptions filters out already selected skill IDs", () => {

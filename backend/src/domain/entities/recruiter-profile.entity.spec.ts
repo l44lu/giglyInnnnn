@@ -1,4 +1,7 @@
 import { RecruiterProfileEntity } from './recruiter-profile.entity';
+import { UserEntities } from './user.entities';
+import { CompanyEntity } from './company.entity';
+import { Role } from '../enums/role.enum';
 
 describe('RecruiterProfileEntity', () => {
   it('should instantiate and assign all properties via partial constructor', () => {
@@ -72,5 +75,39 @@ describe('RecruiterProfileEntity', () => {
     expect(entity).toBeInstanceOf(RecruiterProfileEntity);
     expect(typeof entity.roleTitle).toBe('string');
     expect(typeof entity.yearsExperience).toBe('number');
+  });
+
+  it('should support optional user and company relations and default to null safely', () => {
+    const user = new UserEntities({
+      id: 'user-1',
+      firstName: 'Sarah',
+      lastName: 'Jenkins',
+      email: 'sarah@example.com',
+      role: Role.RECRUITER,
+    });
+    const company = new CompanyEntity({
+      id: 'comp-1',
+      name: 'SwiftPack Storage',
+    });
+
+    const entityWithRelations = new RecruiterProfileEntity({
+      id: 'rec-1',
+      userId: 'user-1',
+      user,
+      company,
+    });
+
+    expect(entityWithRelations.user).toBe(user);
+    expect(entityWithRelations.user?.firstName).toBe('Sarah');
+    expect(entityWithRelations.company).toBe(company);
+    expect(entityWithRelations.company?.name).toBe('SwiftPack Storage');
+
+    const entityWithoutRelations = new RecruiterProfileEntity({
+      id: 'rec-2',
+      userId: 'user-2',
+    });
+
+    expect(entityWithoutRelations.user).toBeNull();
+    expect(entityWithoutRelations.company).toBeNull();
   });
 });

@@ -1,4 +1,5 @@
 import React from "react";
+import { useNavigate } from "react-router-dom";
 import { Bell } from "lucide-react";
 import { WorkerSidebar } from "@/components/worker/WorkerSidebar";
 import { HeroActionCards } from "@/components/worker/HeroActionCards";
@@ -7,6 +8,8 @@ import { RecentActivity } from "@/components/worker/RecentActivity";
 import { TopMatches } from "@/components/worker/TopMatches";
 
 export const WorkerDashboard: React.FC = () => {
+  const navigate = useNavigate();
+
   return (
     <div className="flex min-h-screen bg-white text-slate-900 antialiased font-sans">
       {/* Left Sidebar */}
@@ -38,7 +41,11 @@ export const WorkerDashboard: React.FC = () => {
           </div>
 
           {/* Action Cards (Looking for new work? / Need an extra hand?) */}
-          <HeroActionCards />
+          <HeroActionCards
+            onFindJobs={() => {
+              void navigate("/worker/find-jobs");
+            }}
+          />
 
           {/* Stats / Metric Cards */}
           <StatsCards

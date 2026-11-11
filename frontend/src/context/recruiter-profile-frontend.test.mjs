@@ -249,16 +249,30 @@ describe("Step 3.8: Recruiter Profile Frontend — Figma-Based Implementation", 
       assert.match(recruiterApi, /["']\/recruiter\/company\/logo["']/);
     });
 
-    test("8.3. CompanyCard has file input for logo upload", () => {
-      assert.match(companyCard, /type="file"/);
-      assert.match(
+    test("8.3. Company logo upload is handled via unified profile image, NOT RecruiterCompanyCard", () => {
+      assert.doesNotMatch(
         companyCard,
-        /accept="image\/jpeg,image\/png,image\/webp"/,
+        /type="file"/,
+        "RecruiterCompanyCard must not have separate file input for logo upload",
+      );
+      assert.match(
+        overview,
+        /type="file"/,
+        "RecruiterProfileOverview must have file input for unified image upload",
       );
     });
 
-    test("8.4. CompanyCard validates logo file before upload", () => {
-      assert.match(companyCard, /validateLogoFile/);
+    test("8.4. RecruiterProfileOverview validates logo file before upload", () => {
+      assert.match(
+        overview,
+        /validateLogoFile/,
+        "RecruiterProfileOverview must validate logo file",
+      );
+      assert.doesNotMatch(
+        companyCard,
+        /validateLogoFile/,
+        "RecruiterCompanyCard must not validate logo file since upload control was removed",
+      );
     });
   });
 
@@ -304,22 +318,28 @@ describe("Step 3.8: Recruiter Profile Frontend — Figma-Based Implementation", 
 
   // ─── 12. Personal info save ──────────────────────────────────────
   describe("12. Personal info save", () => {
-    test("12.1. PersonalInfoCard calls updateRecruiterPersonalProfile", () => {
-      assert.match(personalInfo, /updateRecruiterPersonalProfile/);
+    test("12.1. RecruiterProfile page calls updateRecruiterPersonalProfile for personal info", () => {
+      assert.match(profilePage, /updateRecruiterPersonalProfile/);
     });
 
-    test("12.2. PersonalInfoCard sends firstName, lastName, phone, location, bio", () => {
-      assert.match(personalInfo, /firstName/);
-      assert.match(personalInfo, /lastName/);
-      assert.match(personalInfo, /phone/);
-      assert.match(personalInfo, /location/);
-      assert.match(personalInfo, /bio/);
+    test("12.2. RecruiterProfile page sends firstName, lastName, phone, location, bio", () => {
+      assert.match(profilePage, /firstName/);
+      assert.match(profilePage, /lastName/);
+      assert.match(profilePage, /phone/);
+      assert.match(profilePage, /location/);
+      assert.match(profilePage, /bio/);
     });
 
-    test("12.3. PersonalInfoCard has edit/save/cancel controls", () => {
-      assert.match(personalInfo, /handleStartEditingPersonal/);
-      assert.match(personalInfo, /handleSavePersonal/);
-      assert.match(personalInfo, /handleCancelPersonal/);
+    test("12.3. PersonalInfoCard receives unified edit state props and controlled handlers", () => {
+      assert.match(personalInfo, /isEditingDetails/);
+      assert.match(personalInfo, /isSavingDetails/);
+      assert.match(personalInfo, /onChangeFullName/);
+      assert.match(personalInfo, /onChangePhone/);
+      assert.match(personalInfo, /onChangeLocation/);
+      assert.match(personalInfo, /onChangeBio/);
+      assert.doesNotMatch(personalInfo, /handleStartEditingPersonal/);
+      assert.doesNotMatch(personalInfo, /handleSavePersonal/);
+      assert.doesNotMatch(personalInfo, /handleCancelPersonal/);
     });
   });
 

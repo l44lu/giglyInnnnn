@@ -3,6 +3,7 @@ import {
   Get,
   Patch,
   Post,
+  Delete,
   Body,
   Inject,
   UseGuards,
@@ -18,6 +19,7 @@ import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
 import { CurrentUser } from '../decorators/current-user.decorator';
 import { BypassResponseWrapper } from '../decorators/bypass-response-wrapper.decorator';
+import { ResponseMessage } from '../decorators/response-message.decorator';
 import { Role } from '../../domain/enums/role.enum';
 import { IGetWorkerProfileUseCase } from '../../application/use-cases/worker-profile/interface/get-worker-profile.use-case.interface';
 import { IUpdateWorkerProfileUseCase } from '../../application/use-cases/worker-profile/interface/update-worker-profile.use-case.interface';
@@ -26,6 +28,10 @@ import {
   UploadWorkerAvatarResult,
 } from '../../application/use-cases/worker-profile/interface/upload-worker-avatar.use-case.interface';
 import { IGetWorkerAvatarUseCase } from '../../application/use-cases/worker-profile/interface/get-worker-avatar.use-case.interface';
+import {
+  IRemoveWorkerAvatarUseCase,
+  RemoveWorkerAvatarResult,
+} from '../../application/use-cases/worker-profile/interface/remove-worker-avatar.use-case.interface';
 import { IUpdateWorkerPersonalProfileUseCase } from '../../application/use-cases/worker-profile/interface/update-worker-personal-profile.use-case.interface';
 import { UpdateWorkerProfileInputDto } from '../../application/dto/worker-profile/update-worker-profile-input.dto';
 import { UpdateWorkerPersonalProfileInputDto } from '../../application/dto/worker-profile/update-worker-personal-profile-input.dto';
@@ -56,6 +62,8 @@ export class WorkerProfileController {
     private readonly uploadWorkerAvatarUseCase: IUploadWorkerAvatarUseCase,
     @Inject(IGetWorkerAvatarUseCase)
     private readonly getWorkerAvatarUseCase: IGetWorkerAvatarUseCase,
+    @Inject(IRemoveWorkerAvatarUseCase)
+    private readonly removeWorkerAvatarUseCase: IRemoveWorkerAvatarUseCase,
   ) {}
 
   @Get('profile')
@@ -123,5 +131,13 @@ export class WorkerProfileController {
     res.setHeader('Content-Type', file.contentType);
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(file.buffer);
+  }
+
+  @Delete('profile/avatar')
+  @ResponseMessage('Avatar removed successfully')
+  async removeAvatar(
+    @CurrentUser('id') userId: string,
+  ): Promise<RemoveWorkerAvatarResult> {
+    return this.removeWorkerAvatarUseCase.execute(userId);
   }
 }

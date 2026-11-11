@@ -12,23 +12,30 @@ import {
   X,
   LogOut,
   User,
+  Building2,
 } from "lucide-react";
 import { useAuth } from "@/context";
 import {
   getAvatarVersion,
   fetchRecruiterAvatarBlob,
+  getRecruiterCompany,
+  fetchRecruiterCompanyLogoBlob,
+  getLogoVersion,
 } from "@/lib/recruiter-api";
+import type { Company } from "@/types/recruiter-profile";
 
 export interface RecruiterSidebarProps {
   activeTab?: string;
   className?: string;
   avatarVersion?: string | number;
+  company?: Company | null;
 }
 
 export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
   activeTab = "dashboard",
   className = "",
   avatarVersion: propAvatarVersion,
+  company: propCompany,
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
@@ -40,69 +47,135 @@ export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
       ? `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim()
       : "Recruiter";
 
-  const [syncedVersion, setSyncedVersion] = useState<
+  const [internalCompany, setInternalCompany] = useState<Company | null>(
+    propCompany !== undefined ? propCompany : null,
+  );
+
+  const [syncedAvatarVersion, setSyncedAvatarVersion] = useState<
     string | number | undefined
   >(() => getAvatarVersion());
+  const [syncedLogoVersion, setSyncedLogoVersion] = useState<
+    string | number | undefined
+  >(() => getLogoVersion());
+
+  // Fetch company on mount if not provided as prop
+  useEffect(() => {
+    if (propCompany !== undefined) {
+      return;
+    }
+
+    let isMounted = true;
+    const loadCompany = async () => {
+      try {
+        const data = await getRecruiterCompany();
+        if (!isMounted) return;
+        setInternalCompany(data);
+      } catch {
+        if (isMounted) {
+          setInternalCompany(null);
+        }
+      }
+    };
+
+    void loadCompany();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [propCompany]);
 
   useEffect(() => {
-    const handleVersionUpdate = (e: Event) => {
+    const handleAvatarVersionUpdate = (e: Event) => {
       const customEvent = e as CustomEvent<number>;
-      setSyncedVersion(customEvent.detail);
+      setSyncedAvatarVersion(customEvent.detail);
+    };
+    const handleLogoVersionUpdate = (e: Event) => {
+      const customEvent = e as CustomEvent<number>;
+      setSyncedLogoVersion(customEvent.detail);
+      if (propCompany === undefined) {
+        void getRecruiterCompany()
+          .then((data) => setInternalCompany(data))
+          .catch(() => {});
+      }
     };
     window.addEventListener(
       "gigly:recruiter-avatar-version-updated",
-      handleVersionUpdate,
+      handleAvatarVersionUpdate,
     );
     window.addEventListener(
       "gigly:avatar-version-updated",
-      handleVersionUpdate,
+      handleAvatarVersionUpdate,
+    );
+    window.addEventListener(
+      "gigly:recruiter-company-logo-version-updated",
+      handleLogoVersionUpdate,
     );
     return () => {
       window.removeEventListener(
         "gigly:recruiter-avatar-version-updated",
-        handleVersionUpdate,
+        handleAvatarVersionUpdate,
       );
       window.removeEventListener(
         "gigly:avatar-version-updated",
-        handleVersionUpdate,
+        handleAvatarVersionUpdate,
+      );
+      window.removeEventListener(
+        "gigly:recruiter-company-logo-version-updated",
+        handleLogoVersionUpdate,
       );
     };
-  }, []);
+  }, [propCompany]);
 
-  const activeVersion = propAvatarVersion ?? syncedVersion;
-  const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
-  const [avatarLoadError, setAvatarLoadError] = useState<boolean>(false);
+  const effectiveCompany =
+    propCompany !== undefined ? propCompany : internalCompany;
+  const hasLinkedCompany = Boolean(
+    effectiveCompany && (effectiveCompany.id || effectiveCompany.name),
+  );
 
-  const rawAvatarUrl = user?.avatarUrl?.trim();
+  const activeVersion = hasLinkedCompany
+    ? (propAvatarVersion ?? syncedLogoVersion)
+    : (propAvatarVersion ?? syncedAvatarVersion);
+
+  const [imageObjectUrl, setImageObjectUrl] = useState<string | null>(null);
+  const [imageLoadError, setImageLoadError] = useState<boolean>(false);
+
+  const rawImageUrl = hasLinkedCompany
+    ? effectiveCompany?.logoUrl?.trim()
+    : user?.avatarUrl?.trim();
 
   useEffect(() => {
     let isMounted = true;
     let localUrl: string | null = null;
 
-    const loadAvatar = async () => {
-      if (!rawAvatarUrl) {
+    const loadImage = async () => {
+      if (!rawImageUrl) {
+        setImageObjectUrl(null);
+        setImageLoadError(false);
         return;
       }
 
       try {
-        const blob = await fetchRecruiterAvatarBlob(activeVersion);
+        const blob = hasLinkedCompany
+          ? await fetchRecruiterCompanyLogoBlob(activeVersion)
+          : await fetchRecruiterAvatarBlob(activeVersion);
+
         if (!isMounted) return;
         if (blob) {
           localUrl = URL.createObjectURL(blob);
-          setAvatarObjectUrl(localUrl);
-          setAvatarLoadError(false);
+          setImageObjectUrl(localUrl);
+          setImageLoadError(false);
         } else {
-          setAvatarObjectUrl(null);
+          setImageObjectUrl(null);
         }
       } catch {
         if (isMounted) {
-          setAvatarObjectUrl(null);
-          setAvatarLoadError(true);
+          setImageObjectUrl(null);
+          setImageLoadError(true);
         }
       }
     };
 
-    void loadAvatar();
+    void loadImage();
 
     return () => {
       isMounted = false;
@@ -110,9 +183,9 @@ export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
         URL.revokeObjectURL(localUrl);
       }
     };
-  }, [rawAvatarUrl, activeVersion]);
+  }, [hasLinkedCompany, rawImageUrl, activeVersion]);
 
-  const currentAvatarUrl = rawAvatarUrl ? avatarObjectUrl : null;
+  const currentImageUrl = rawImageUrl ? imageObjectUrl : null;
 
   const handleLogout = () => {
     void logout();
@@ -282,13 +355,21 @@ export const RecruiterSidebar: React.FC<RecruiterSidebarProps> = ({
             aria-label="View recruiter profile"
           >
             <div className="w-10 h-10 rounded-full bg-slate-200 text-slate-600 flex items-center justify-center shrink-0 ring-2 ring-white shadow-sm overflow-hidden">
-              {currentAvatarUrl && !avatarLoadError ? (
+              {currentImageUrl && !imageLoadError ? (
                 <img
-                  src={currentAvatarUrl}
-                  alt={displayName}
-                  onError={() => setAvatarLoadError(true)}
+                  src={currentImageUrl}
+                  alt={
+                    hasLinkedCompany
+                      ? effectiveCompany?.name
+                        ? `${effectiveCompany.name} logo`
+                        : "Company logo"
+                      : displayName
+                  }
+                  onError={() => setImageLoadError(true)}
                   className="w-full h-full object-cover"
                 />
+              ) : hasLinkedCompany ? (
+                <Building2 className="w-5 h-5 text-slate-500" />
               ) : (
                 <User className="w-5 h-5 text-slate-500" />
               )}

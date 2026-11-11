@@ -28,6 +28,7 @@ import { IUpdateWorkerProfileUseCase } from '../../application/use-cases/worker-
 import { IUpdateWorkerPersonalProfileUseCase } from '../../application/use-cases/worker-profile/interface/update-worker-personal-profile.use-case.interface';
 import { IUploadWorkerAvatarUseCase } from '../../application/use-cases/worker-profile/interface/upload-worker-avatar.use-case.interface';
 import { IGetWorkerAvatarUseCase } from '../../application/use-cases/worker-profile/interface/get-worker-avatar.use-case.interface';
+import { IRemoveWorkerAvatarUseCase } from '../../application/use-cases/worker-profile/interface/remove-worker-avatar.use-case.interface';
 
 describe('ResponseInterceptor with Real Production Controllers', () => {
   let app: INestApplication;
@@ -78,6 +79,12 @@ describe('ResponseInterceptor with Real Production Controllers', () => {
           useValue: { execute: jest.fn() },
         },
         { provide: IGetWorkerAvatarUseCase, useValue: getWorkerAvatarUseCase },
+        {
+          provide: IRemoveWorkerAvatarUseCase,
+          useValue: {
+            execute: jest.fn().mockResolvedValue({ avatarUrl: null }),
+          },
+        },
       ],
     })
       .overrideGuard(JwtAuthGuard)
@@ -174,6 +181,21 @@ describe('ResponseInterceptor with Real Production Controllers', () => {
       data: {
         resetToken: 'test-reset-token-abc',
         message: 'Verification successful. You may now reset your password.',
+      },
+    });
+  });
+
+  it('Real DELETE /worker/profile/avatar: produces envelope with custom message and { avatarUrl: null }', async () => {
+    const res = await request(app.getHttpServer())
+      .delete('/worker/profile/avatar')
+      .expect(200);
+
+    expect(res.body).toEqual({
+      success: true,
+      statusCode: 200,
+      message: 'Avatar removed successfully',
+      data: {
+        avatarUrl: null,
       },
     });
   });

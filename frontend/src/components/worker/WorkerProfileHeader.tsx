@@ -72,16 +72,16 @@ export const WorkerProfileHeader: React.FC<WorkerProfileHeaderProps> = ({
                 onClick={onSaveDetails}
                 disabled={isSavingDetails}
                 className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white bg-[#1877f2] hover:bg-[#166fe5] shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="Save details"
+                aria-label="Save changes"
               >
-                {isSavingDetails ? "Saving..." : "Save Details"}
+                {isSavingDetails ? "Saving..." : "Save Changes"}
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Professional Details error alert */}
+      {/* Unified details error alert */}
       {detailsError && (
         <div
           role="alert"

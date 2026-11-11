@@ -1,124 +1,51 @@
-import React, { useState } from "react";
-import axios from "axios";
+import React from "react";
 import { useAuth } from "@/context";
-import {
-  updateRecruiterPersonalProfile,
-  parseFullName,
-  formatNullableField,
-} from "@/lib/recruiter-api";
 import { User, Phone, MapPin, FileText } from "lucide-react";
-import Swal from "sweetalert2";
 
-const Toast = Swal.mixin({
-  toast: true,
-  position: "top-end",
-  showConfirmButton: false,
-  timer: 3000,
-  timerProgressBar: true,
-});
+export interface RecruiterPersonalInfoCardProps {
+  isEditingDetails?: boolean;
+  isSavingDetails?: boolean;
+  fullName?: string;
+  onChangeFullName?: (value: string) => void;
+  phone?: string;
+  onChangePhone?: (value: string) => void;
+  location?: string;
+  onChangeLocation?: (value: string) => void;
+  bio?: string;
+  onChangeBio?: (value: string) => void;
+}
 
-export const RecruiterPersonalInfoCard: React.FC = () => {
-  const { user, refreshUser } = useAuth();
-
-  const [isEditingPersonal, setIsEditingPersonal] = useState(false);
-  const [isSavingPersonal, setIsSavingPersonal] = useState(false);
-  const [personalError, setPersonalError] = useState<string | null>(null);
-
-  const [customFullName, setCustomFullName] = useState<string | null>(null);
-  const [customPhone, setCustomPhone] = useState<string | null>(null);
-  const [customLocation, setCustomLocation] = useState<string | null>(null);
-  const [customBio, setCustomBio] = useState<string | null>(null);
+export const RecruiterPersonalInfoCard: React.FC<
+  RecruiterPersonalInfoCardProps
+> = ({
+  isEditingDetails = false,
+  isSavingDetails = false,
+  fullName: controlledFullName,
+  onChangeFullName,
+  phone: controlledPhone,
+  onChangePhone,
+  location: controlledLocation,
+  onChangeLocation,
+  bio: controlledBio,
+  onChangeBio,
+}) => {
+  const { user } = useAuth();
 
   const currentSavedName =
     `${user?.firstName ?? ""}`.trim() || `${user?.lastName ?? ""}`.trim()
       ? `${user?.firstName ?? ""} ${user?.lastName ?? ""}`.trim()
       : "";
 
-  const fullName = isEditingPersonal
-    ? (customFullName ?? "")
-    : currentSavedName;
+  const fullName =
+    controlledFullName !== undefined ? controlledFullName : currentSavedName;
   const email = user?.email || "—";
-  const phone = isEditingPersonal ? (customPhone ?? "") : user?.phone || "";
-  const location = isEditingPersonal
-    ? (customLocation ?? "")
-    : user?.location || "";
-  const bio = isEditingPersonal ? (customBio ?? "") : user?.bio || "";
-
-  const handleStartEditingPersonal = () => {
-    setCustomFullName(currentSavedName);
-    setCustomPhone(user?.phone ?? "");
-    setCustomLocation(user?.location ?? "");
-    setCustomBio(user?.bio ?? "");
-    setPersonalError(null);
-    setIsEditingPersonal(true);
-  };
-
-  const handleCancelPersonal = () => {
-    setCustomFullName(null);
-    setCustomPhone(null);
-    setCustomLocation(null);
-    setCustomBio(null);
-    setPersonalError(null);
-    setIsEditingPersonal(false);
-  };
-
-  const handleSavePersonal = async () => {
-    if (isSavingPersonal) return;
-    const rawName = customFullName ?? fullName;
-    const trimmedName = rawName.trim();
-    if (!trimmedName) {
-      setPersonalError("Full name is required.");
-      return;
-    }
-
-    const { firstName, lastName } = parseFullName(trimmedName);
-    const rawPhone = customPhone ?? (user?.phone || "");
-    const rawLocation = customLocation ?? (user?.location || "");
-    const rawBio = customBio ?? (user?.bio || "");
-
-    const payload = {
-      firstName,
-      lastName,
-      phone: formatNullableField(rawPhone),
-      location: formatNullableField(rawLocation),
-      bio: formatNullableField(rawBio),
-    };
-
-    setIsSavingPersonal(true);
-    setPersonalError(null);
-
-    try {
-      await updateRecruiterPersonalProfile(payload);
-      await refreshUser();
-      setCustomFullName(null);
-      setCustomPhone(null);
-      setCustomLocation(null);
-      setCustomBio(null);
-      setIsEditingPersonal(false);
-      void Toast.fire({
-        icon: "success",
-        title: "Personal information updated successfully",
-      });
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        const resData = err.response?.data as
-          | { message?: string | string[] }
-          | undefined;
-        const msg = Array.isArray(resData?.message)
-          ? resData.message.join(", ")
-          : resData?.message;
-        setPersonalError(
-          msg || "Failed to update personal details. Please try again.",
-        );
-      } else {
-        setPersonalError(
-          "Failed to update personal details. Please try again.",
-        );
-      }
-    } finally {
-      setIsSavingPersonal(false);
-    }
-  };
+  const phone =
+    controlledPhone !== undefined ? controlledPhone : user?.phone || "";
+  const location =
+    controlledLocation !== undefined
+      ? controlledLocation
+      : user?.location || "";
+  const bio = controlledBio !== undefined ? controlledBio : user?.bio || "";
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 p-6 sm:p-8 shadow-xs">
@@ -132,47 +59,7 @@ export const RecruiterPersonalInfoCard: React.FC = () => {
             editable sections for your core details.
           </p>
         </div>
-
-        <div className="shrink-0 pt-1">
-          {!isEditingPersonal ? (
-            <button
-              type="button"
-              onClick={handleStartEditingPersonal}
-              className="text-sm font-semibold text-[#1877f2] hover:text-[#166fe5] transition-colors cursor-pointer"
-              aria-label="Edit Personal Information"
-            >
-              Update
-            </button>
-          ) : (
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleCancelPersonal}
-                disabled={isSavingPersonal}
-                className="text-sm font-medium text-slate-500 hover:text-slate-700 transition-colors cursor-pointer disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  void handleSavePersonal();
-                }}
-                disabled={isSavingPersonal}
-                className="text-sm font-semibold text-[#1877f2] hover:text-[#166fe5] transition-colors cursor-pointer disabled:opacity-50"
-              >
-                {isSavingPersonal ? "Saving..." : "Save"}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
-
-      {personalError && (
-        <div className="mt-4 p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs">
-          {personalError}
-        </div>
-      )}
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mt-6">
         {/* Full Name */}
@@ -183,14 +70,15 @@ export const RecruiterPersonalInfoCard: React.FC = () => {
           >
             Full Name
           </label>
-          {isEditingPersonal ? (
+          {isEditingDetails ? (
             <input
               id="recruiter-full-name"
               type="text"
               value={fullName}
-              onChange={(e) => setCustomFullName(e.target.value)}
+              onChange={(e) => onChangeFullName?.(e.target.value)}
+              disabled={isSavingDetails}
               placeholder="e.g. Jane Doe"
-              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2]"
+              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2] disabled:opacity-50 disabled:bg-slate-50"
             />
           ) : (
             <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
@@ -221,14 +109,15 @@ export const RecruiterPersonalInfoCard: React.FC = () => {
           >
             Phone Number
           </label>
-          {isEditingPersonal ? (
+          {isEditingDetails ? (
             <input
               id="recruiter-phone"
               type="tel"
               value={phone}
-              onChange={(e) => setCustomPhone(e.target.value)}
+              onChange={(e) => onChangePhone?.(e.target.value)}
+              disabled={isSavingDetails}
               placeholder="e.g. +1 555-123-4567"
-              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2]"
+              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2] disabled:opacity-50 disabled:bg-slate-50"
             />
           ) : (
             <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
@@ -246,14 +135,15 @@ export const RecruiterPersonalInfoCard: React.FC = () => {
           >
             Location
           </label>
-          {isEditingPersonal ? (
+          {isEditingDetails ? (
             <input
               id="recruiter-location"
               type="text"
               value={location}
-              onChange={(e) => setCustomLocation(e.target.value)}
+              onChange={(e) => onChangeLocation?.(e.target.value)}
+              disabled={isSavingDetails}
               placeholder="e.g. San Francisco, CA"
-              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2]"
+              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2] disabled:opacity-50 disabled:bg-slate-50"
             />
           ) : (
             <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
@@ -271,14 +161,15 @@ export const RecruiterPersonalInfoCard: React.FC = () => {
           >
             Professional Bio
           </label>
-          {isEditingPersonal ? (
+          {isEditingDetails ? (
             <textarea
               id="recruiter-bio"
               rows={3}
               value={bio}
-              onChange={(e) => setCustomBio(e.target.value)}
+              onChange={(e) => onChangeBio?.(e.target.value)}
+              disabled={isSavingDetails}
               placeholder="Introduce yourself, your recruiting focus, and what types of roles you hire for..."
-              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2]"
+              className="w-full px-3.5 py-2 rounded-xl text-sm border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-[#1877f2] disabled:opacity-50 disabled:bg-slate-50"
             />
           ) : (
             <div className="flex items-start gap-2 text-sm text-slate-700">

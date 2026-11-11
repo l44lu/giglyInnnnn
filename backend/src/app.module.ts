@@ -6,6 +6,7 @@ import { AuthController } from './presentation/auth/auth.controller';
 import { WorkerProfileController } from './presentation/worker/worker-profile.controller';
 import { RecruiterProfileController } from './presentation/recruiter/recruiter-profile.controller';
 import { SkillsController } from './presentation/skills/skills.controller';
+import { JobPostingController } from './presentation/job-posting/job-posting.controller';
 import { AdminUserManagementController } from './presentation/admin/admin-user-management.controller';
 import { HealthController } from './presentation/health/health.controller';
 import { AuthCookieService } from './presentation/auth/services/auth-cookie.service';
@@ -37,6 +38,8 @@ import { IUploadWorkerAvatarUseCase } from './application/use-cases/worker-profi
 import { UploadWorkerAvatarUseCase } from './application/use-cases/worker-profile/implementation/upload-worker-avatar.use-case';
 import { IGetWorkerAvatarUseCase } from './application/use-cases/worker-profile/interface/get-worker-avatar.use-case.interface';
 import { GetWorkerAvatarUseCase } from './application/use-cases/worker-profile/implementation/get-worker-avatar.use-case';
+import { IRemoveWorkerAvatarUseCase } from './application/use-cases/worker-profile/interface/remove-worker-avatar.use-case.interface';
+import { RemoveWorkerAvatarUseCase } from './application/use-cases/worker-profile/implementation/remove-worker-avatar.use-case';
 import { IUpdateWorkerPersonalProfileUseCase } from './application/use-cases/worker-profile/interface/update-worker-personal-profile.use-case.interface';
 import { UpdateWorkerPersonalProfileUseCase } from './application/use-cases/worker-profile/implementation/update-worker-personal-profile.use-case';
 import { IGetSkillsCatalogUseCase } from './application/use-cases/worker-profile/interface/get-skills-catalog.use-case.interface';
@@ -93,6 +96,8 @@ import { IGetRecruiterAvatarUseCase } from './application/use-cases/recruiter-pr
 import { GetRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/implementation/get-recruiter-avatar.use-case';
 import { IUploadRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/interface/upload-recruiter-avatar.use-case.interface';
 import { UploadRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/implementation/upload-recruiter-avatar.use-case';
+import { IRemoveRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/interface/remove-recruiter-avatar.use-case.interface';
+import { RemoveRecruiterAvatarUseCase } from './application/use-cases/recruiter-profile/implementation/remove-recruiter-avatar.use-case';
 import { IGetRecruiterCompanyUseCase } from './application/use-cases/recruiter-profile/interface/get-recruiter-company.use-case.interface';
 import { GetRecruiterCompanyUseCase } from './application/use-cases/recruiter-profile/implementation/get-recruiter-company.use-case';
 import { IUpdateRecruiterCompanyUseCase } from './application/use-cases/recruiter-profile/interface/update-recruiter-company.use-case.interface';
@@ -101,6 +106,8 @@ import { IUploadRecruiterCompanyLogoUseCase } from './application/use-cases/recr
 import { UploadRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/implementation/upload-recruiter-company-logo.use-case';
 import { IGetRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/interface/get-recruiter-company-logo.use-case.interface';
 import { GetRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/implementation/get-recruiter-company-logo.use-case';
+import { IRemoveRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/interface/remove-recruiter-company-logo.use-case.interface';
+import { RemoveRecruiterCompanyLogoUseCase } from './application/use-cases/recruiter-profile/implementation/remove-recruiter-company-logo.use-case';
 import { IListAdminUserUseCase } from './application/use-cases/admin-user-management/interface/list-admin-users.use-case.interface';
 import { ListAdminUserUseCase } from './application/use-cases/admin-user-management/implementation/list-admin-users.use-case';
 import { IGetAdminUserUseCase } from './application/use-cases/admin-user-management/interface/get-admin-user.use-case.interface';
@@ -113,6 +120,33 @@ import { ISetAdminUserBlockStatusUseCase } from './application/use-cases/admin-u
 import { SetAdminUserBlockStatusUseCase } from './application/use-cases/admin-user-management/implementation/set-admin-user-block-status.use-case';
 import { IDeactivateAdminUserUseCase } from './application/use-cases/admin-user-management/interface/deactivate-admin-user.use-case.interface';
 import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-management/implementation/deactivate-admin-user.use-case';
+import { IJobCategoryRepository } from './domain/repositories/job-category.repository.interface';
+import { PrismaJobCategoryRepository } from './infrastructure/repositories/prisma-job-category.repository';
+import { IJobPostRepository } from './domain/repositories/job-post.repository.interface';
+import { PrismaJobPostRepository } from './infrastructure/repositories/prisma-job-post.repository';
+import { IGetJobCategoriesUseCase } from './application/use-cases/job-posting/interface/get-job-categories.use-case.interface';
+import { GetJobCategoriesUseCase } from './application/use-cases/job-posting/implementation/get-job-categories.use-case';
+import { ICreateDraftJobPostUseCase } from './application/use-cases/job-posting/interface/create-draft-job-post.use-case.interface';
+import { CreateDraftJobPostUseCase } from './application/use-cases/job-posting/implementation/create-draft-job-post.use-case';
+import { IPublishJobPostUseCase } from './application/use-cases/job-posting/interface/publish-job-post.use-case.interface';
+import { PublishJobPostUseCase } from './application/use-cases/job-posting/implementation/publish-job-post.use-case';
+import { IGetRecruiterJobPostsUseCase } from './application/use-cases/job-posting/interface/get-recruiter-job-posts.use-case.interface';
+import { GetRecruiterJobPostsUseCase } from './application/use-cases/job-posting/implementation/get-recruiter-job-posts.use-case';
+import { IGetRecruiterJobPostByIdUseCase } from './application/use-cases/job-posting/interface/get-recruiter-job-post-by-id.use-case.interface';
+import { GetRecruiterJobPostByIdUseCase } from './application/use-cases/job-posting/implementation/get-recruiter-job-post-by-id.use-case';
+import { IUpdateJobPostUseCase } from './application/use-cases/job-posting/interface/update-job-post.use-case.interface';
+import { UpdateJobPostUseCase } from './application/use-cases/job-posting/implementation/update-job-post.use-case';
+import { ITransitionJobPostStatusUseCase } from './application/use-cases/job-posting/interface/transition-job-post-status.use-case.interface';
+import { TransitionJobPostStatusUseCase } from './application/use-cases/job-posting/implementation/transition-job-post-status.use-case';
+import { IFindOpenJobsUseCase } from './application/use-cases/job-discovery/interface/find-open-jobs.use-case.interface';
+import { FindOpenJobsUseCase } from './application/use-cases/job-discovery/implementation/find-open-jobs.use-case';
+import { IGetWorkerJobDetailsUseCase } from './application/use-cases/job-discovery/interface/get-worker-job-details.use-case.interface';
+import { GetWorkerJobDetailsUseCase } from './application/use-cases/job-discovery/implementation/get-worker-job-details.use-case';
+import { IReportRepository } from './domain/repositories/report.repository.interface';
+import { PrismaReportRepository } from './infrastructure/repositories/prisma-report.repository';
+import { IReportJobUseCase } from './application/use-cases/job-discovery/interface/report-job.use-case.interface';
+import { ReportJobUseCase } from './application/use-cases/job-discovery/implementation/report-job.use-case';
+import { JobDiscoveryController } from './presentation/job-discovery/job-discovery.controller';
 
 @Module({
   imports: [
@@ -150,6 +184,8 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
     WorkerProfileController,
     RecruiterProfileController,
     SkillsController,
+    JobPostingController,
+    JobDiscoveryController,
     AdminUserManagementController,
     HealthController,
   ],
@@ -264,6 +300,10 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
       useClass: GetWorkerAvatarUseCase,
     },
     {
+      provide: IRemoveWorkerAvatarUseCase,
+      useClass: RemoveWorkerAvatarUseCase,
+    },
+    {
       provide: IUpdateWorkerPersonalProfileUseCase,
       useClass: UpdateWorkerPersonalProfileUseCase,
     },
@@ -308,6 +348,10 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
       useClass: UploadRecruiterAvatarUseCase,
     },
     {
+      provide: IRemoveRecruiterAvatarUseCase,
+      useClass: RemoveRecruiterAvatarUseCase,
+    },
+    {
       provide: IGetRecruiterCompanyUseCase,
       useClass: GetRecruiterCompanyUseCase,
     },
@@ -322,6 +366,10 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
     {
       provide: IGetRecruiterCompanyLogoUseCase,
       useClass: GetRecruiterCompanyLogoUseCase,
+    },
+    {
+      provide: IRemoveRecruiterCompanyLogoUseCase,
+      useClass: RemoveRecruiterCompanyLogoUseCase,
     },
     {
       provide: IListAdminUserUseCase,
@@ -346,6 +394,58 @@ import { DeactivateAdminUserUseCase } from './application/use-cases/admin-user-m
     {
       provide: IDeactivateAdminUserUseCase,
       useClass: DeactivateAdminUserUseCase,
+    },
+    {
+      provide: IJobCategoryRepository,
+      useClass: PrismaJobCategoryRepository,
+    },
+    {
+      provide: IJobPostRepository,
+      useClass: PrismaJobPostRepository,
+    },
+    {
+      provide: IGetJobCategoriesUseCase,
+      useClass: GetJobCategoriesUseCase,
+    },
+    {
+      provide: ICreateDraftJobPostUseCase,
+      useClass: CreateDraftJobPostUseCase,
+    },
+    {
+      provide: IPublishJobPostUseCase,
+      useClass: PublishJobPostUseCase,
+    },
+    {
+      provide: IGetRecruiterJobPostsUseCase,
+      useClass: GetRecruiterJobPostsUseCase,
+    },
+    {
+      provide: IGetRecruiterJobPostByIdUseCase,
+      useClass: GetRecruiterJobPostByIdUseCase,
+    },
+    {
+      provide: IUpdateJobPostUseCase,
+      useClass: UpdateJobPostUseCase,
+    },
+    {
+      provide: ITransitionJobPostStatusUseCase,
+      useClass: TransitionJobPostStatusUseCase,
+    },
+    {
+      provide: IFindOpenJobsUseCase,
+      useClass: FindOpenJobsUseCase,
+    },
+    {
+      provide: IGetWorkerJobDetailsUseCase,
+      useClass: GetWorkerJobDetailsUseCase,
+    },
+    {
+      provide: IReportRepository,
+      useClass: PrismaReportRepository,
+    },
+    {
+      provide: IReportJobUseCase,
+      useClass: ReportJobUseCase,
     },
     AuthCookieService,
     JwtAuthGuard,

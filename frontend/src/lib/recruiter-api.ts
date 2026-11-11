@@ -144,6 +144,18 @@ export const uploadRecruiterAvatar = async (
 };
 
 /**
+ * Removes the profile avatar for the authenticated recruiter.
+ * Dispatches DELETE /recruiter/profile/avatar with HttpOnly credentials.
+ * Returns the response containing { avatarUrl: null }.
+ */
+export const removeRecruiterAvatar = async (): Promise<{ avatarUrl: null }> => {
+  const response = await api.delete<{ avatarUrl: null }>(
+    "/recruiter/profile/avatar",
+  );
+  return response.data;
+};
+
+/**
  * Fetches the authenticated recruiter's profile avatar image as a Blob using the configured Axios client.
  * Inherits withCredentials: true and single-flight 401 token-refresh interceptors from api.
  * Accepts an optional avatarVersion (string or number) to bypass browser caching when updated.
@@ -253,6 +265,20 @@ export const uploadRecruiterCompanyLogo = async (
         "Content-Type": "multipart/form-data",
       },
     },
+  );
+  return response.data;
+};
+
+/**
+ * Removes the company logo for the authenticated recruiter's associated company.
+ * Dispatches DELETE /recruiter/company/logo with HttpOnly credentials.
+ * Returns the response containing { logoUrl: null }.
+ */
+export const removeRecruiterCompanyLogo = async (): Promise<{
+  logoUrl: null;
+}> => {
+  const response = await api.delete<{ logoUrl: null }>(
+    "/recruiter/company/logo",
   );
   return response.data;
 };

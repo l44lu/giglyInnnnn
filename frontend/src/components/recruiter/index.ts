@@ -9,3 +9,4 @@ export * from "./RecruiterPersonalInfoCard";
 export * from "./RecruiterProfessionalCard";
 export * from "./RecruiterChangePasswordCard";
 export * from "./RecruiterCompanyCard";
+export * from "./job-posting";

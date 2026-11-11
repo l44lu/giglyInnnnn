@@ -61,15 +61,15 @@ describe('NodemailerEmailService', () => {
       await service.sendOtpEmail(testEmail, testOtp);
 
       // Verify safe operational log
-      expect(loggerLogSpy).toHaveBeenCalledWith(
-        `OTP email sent to ${testEmail}`,
-      );
+      expect(loggerLogSpy).toHaveBeenCalledWith('OTP email sent successfully');
+      expect(loggerErrorSpy).not.toHaveBeenCalled();
 
-      // Strictly verify that the plaintext OTP NEVER appears in any logger.log call
+      // Strictly verify that the plaintext OTP and sensitive data NEVER appear in any logger call
       for (const call of loggerLogSpy.mock.calls) {
         const logMessage = String((call as unknown[])[0]);
         expect(logMessage).not.toContain(testOtp);
         expect(logMessage).not.toContain('with otp');
+        expect(logMessage).not.toContain(testEmail);
       }
     });
 
@@ -82,9 +82,16 @@ describe('NodemailerEmailService', () => {
       );
 
       expect(loggerErrorSpy).toHaveBeenCalledWith(
-        `Failed to send OTP email to ${testEmail} `,
+        'Failed to send OTP email',
         error,
       );
+      expect(loggerLogSpy).not.toHaveBeenCalled();
+
+      for (const call of loggerErrorSpy.mock.calls) {
+        const logMessage = String((call as unknown[])[0]);
+        expect(logMessage).not.toContain(testOtp);
+        expect(logMessage).not.toContain(testEmail);
+      }
     });
   });
 
@@ -107,14 +114,16 @@ describe('NodemailerEmailService', () => {
 
       // Verify safe operational log
       expect(loggerLogSpy).toHaveBeenCalledWith(
-        `Password reset OTP email sent to ${testEmail}`,
+        'Password reset OTP email sent successfully',
       );
+      expect(loggerErrorSpy).not.toHaveBeenCalled();
 
-      // Strictly verify that the reset OTP NEVER appears in any logger.log call
+      // Strictly verify that the reset OTP and sensitive data NEVER appear in any logger call
       for (const call of loggerLogSpy.mock.calls) {
         const logMessage = String((call as unknown[])[0]);
         expect(logMessage).not.toContain(resetOtp);
         expect(logMessage).not.toContain('with otp');
+        expect(logMessage).not.toContain(testEmail);
       }
     });
 
@@ -127,9 +136,16 @@ describe('NodemailerEmailService', () => {
       ).rejects.toThrow(error);
 
       expect(loggerErrorSpy).toHaveBeenCalledWith(
-        `Failed to send password reset OTP email to ${testEmail} `,
+        'Failed to send password reset OTP email',
         error,
       );
+      expect(loggerLogSpy).not.toHaveBeenCalled();
+
+      for (const call of loggerErrorSpy.mock.calls) {
+        const logMessage = String((call as unknown[])[0]);
+        expect(logMessage).not.toContain(resetOtp);
+        expect(logMessage).not.toContain(testEmail);
+      }
     });
   });
 });

@@ -194,4 +194,36 @@ describe('HttpExceptionFilter', () => {
     expect(mockStatus).not.toHaveBeenCalled();
     expect(mockJson).not.toHaveBeenCalled();
   });
+
+  it('10. MulterError LIMIT_FILE_SIZE: should format 413 Payload Too Large', () => {
+    const multerError = Object.assign(new Error('File too large'), {
+      name: 'MulterError',
+      code: 'LIMIT_FILE_SIZE',
+    });
+    filter.catch(multerError, mockHost);
+
+    expect(mockStatus).toHaveBeenCalledWith(413);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: false,
+      statusCode: 413,
+      message: 'File size exceeds allowed limit',
+      data: null,
+    });
+  });
+
+  it('11. Generic MulterError: should format 400 Bad Request with multer message', () => {
+    const multerError = Object.assign(new Error('Unexpected field'), {
+      name: 'MulterError',
+      code: 'LIMIT_UNEXPECTED_FILE',
+    });
+    filter.catch(multerError, mockHost);
+
+    expect(mockStatus).toHaveBeenCalledWith(400);
+    expect(mockJson).toHaveBeenCalledWith({
+      success: false,
+      statusCode: 400,
+      message: 'Unexpected field',
+      data: null,
+    });
+  });
 });

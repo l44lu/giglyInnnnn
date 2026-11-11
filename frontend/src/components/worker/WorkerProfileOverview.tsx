@@ -1,7 +1,11 @@
 import React, { useState, useRef, useEffect } from "react";
 import { User as UserIcon, Camera, Loader2 } from "lucide-react";
 import Swal from "sweetalert2";
-import { validateAvatarFile, fetchWorkerAvatarBlob } from "@/lib/worker-api";
+import {
+  validateAvatarFile,
+  fetchWorkerAvatarBlob,
+  removeWorkerAvatar,
+} from "@/lib/worker-api";
 
 const Toast = Swal.mixin({
   toast: true,
@@ -17,6 +21,8 @@ export interface WorkerProfileOverviewProps {
   avatarVersion?: string | number;
   isUploadingAvatar?: boolean;
   onUploadAvatar?: (file: File) => Promise<void>;
+  isRemovingAvatar?: boolean;
+  onRemoveAvatar?: () => Promise<void>;
   location?: string | null;
   bio?: string | null;
   headline?: string | null;
@@ -35,6 +41,8 @@ export const WorkerProfileOverview: React.FC<WorkerProfileOverviewProps> = ({
   avatarVersion,
   isUploadingAvatar = false,
   onUploadAvatar,
+  isRemovingAvatar = false,
+  onRemoveAvatar,
   location,
   bio,
   headline,
@@ -48,6 +56,9 @@ export const WorkerProfileOverview: React.FC<WorkerProfileOverviewProps> = ({
 }) => {
   const [avatarObjectUrl, setAvatarObjectUrl] = useState<string | null>(null);
   const [isLoadingAvatar, setIsLoadingAvatar] = useState<boolean>(false);
+  const [localIsRemovingAvatar, setLocalIsRemovingAvatar] =
+    useState<boolean>(false);
+  const [removedAvatarUrl, setRemovedAvatarUrl] = useState<string | null>(null);
 
   // Ref tracking the object URL currently assigned to <img src>.
   // Used to prevent revoking a URL that React is still rendering.
@@ -58,20 +69,32 @@ export const WorkerProfileOverview: React.FC<WorkerProfileOverviewProps> = ({
   // the browser has decoded and rendered the replacement.
   const previousAvatarObjectUrlRef = useRef<string | null>(null);
 
+  // Ref tracking in-flight avatar fetch operations to prevent race conditions.
+  const avatarFetchIdRef = useRef<number>(0);
+
+  const removing = isRemovingAvatar || localIsRemovingAvatar;
+  const isRemoved =
+    removedAvatarUrl !== null && removedAvatarUrl === (avatarUrl ?? "");
+  const hasSavedAvatar =
+    !isRemoved && Boolean(avatarUrl && avatarUrl.trim() !== "");
+
   useEffect(() => {
     let isMounted = true;
 
     const loadAvatar = async () => {
       if (!avatarUrl || avatarUrl.trim() === "") {
+        setAvatarObjectUrl(null);
+        setIsLoadingAvatar(false);
         return;
       }
 
       // Show loading indicator for this fetch attempt.
       setIsLoadingAvatar(true);
+      const fetchId = ++avatarFetchIdRef.current;
 
       try {
         const blob = await fetchWorkerAvatarBlob(avatarVersion);
-        if (!isMounted) return;
+        if (!isMounted || fetchId !== avatarFetchIdRef.current) return;
 
         if (blob) {
           const newUrl = URL.createObjectURL(blob);
@@ -89,7 +112,7 @@ export const WorkerProfileOverview: React.FC<WorkerProfileOverviewProps> = ({
           setIsLoadingAvatar(false);
         }
       } catch {
-        if (isMounted) {
+        if (isMounted && fetchId === avatarFetchIdRef.current) {
           setAvatarObjectUrl(null);
           setIsLoadingAvatar(false);
         }
@@ -123,7 +146,7 @@ export const WorkerProfileOverview: React.FC<WorkerProfileOverviewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleTriggerUpload = () => {
-    if (isUploadingAvatar) return;
+    if (isUploadingAvatar || removing) return;
     fileInputRef.current?.click();
   };
 
@@ -144,6 +167,52 @@ export const WorkerProfileOverview: React.FC<WorkerProfileOverviewProps> = ({
 
     if (onUploadAvatar) {
       void onUploadAvatar(selectedFile);
+    }
+  };
+
+  const handleRemovePhotoClick = async () => {
+    if (removing || isUploadingAvatar) return;
+
+    const result = await Swal.fire({
+      title: "Remove profile photo?",
+      text: "Removing your photo will restore the default avatar.",
+      icon: "warning",
+      showCancelButton: true,
+      confirmButtonColor: "#dc2626",
+      cancelButtonColor: "#64748b",
+      confirmButtonText: "Yes, remove photo",
+      cancelButtonText: "Cancel",
+    });
+
+    if (!result.isConfirmed) {
+      return;
+    }
+
+    try {
+      setLocalIsRemovingAvatar(true);
+      if (onRemoveAvatar) {
+        await onRemoveAvatar();
+      } else {
+        await removeWorkerAvatar();
+      }
+
+      // Safe cleanup of object URLs upon confirmed successful removal
+      setRemovedAvatarUrl(avatarUrl ?? "");
+      avatarFetchIdRef.current++;
+      if (avatarObjectUrlRef.current) {
+        URL.revokeObjectURL(avatarObjectUrlRef.current);
+        avatarObjectUrlRef.current = null;
+      }
+      if (previousAvatarObjectUrlRef.current) {
+        URL.revokeObjectURL(previousAvatarObjectUrlRef.current);
+        previousAvatarObjectUrlRef.current = null;
+      }
+      setAvatarObjectUrl(null);
+      setIsLoadingAvatar(false);
+    } catch {
+      // Kept visible on failure; caller/handler handles error feedback
+    } finally {
+      setLocalIsRemovingAvatar(false);
     }
   };
 
@@ -173,70 +242,103 @@ export const WorkerProfileOverview: React.FC<WorkerProfileOverviewProps> = ({
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs">
-      {/* Avatar Container: Displays authenticated avatar or neutral fallback icon with camera upload control */}
-      <div className="relative w-20 h-20 shrink-0">
-        <div
-          onClick={handleTriggerUpload}
-          className={`w-20 h-20 rounded-full bg-slate-100 ring-4 ring-slate-50 flex items-center justify-center shrink-0 text-slate-400 overflow-hidden relative ${
-            isUploadingAvatar ? "cursor-not-allowed" : "cursor-pointer group"
-          }`}
-          title={
-            isUploadingAvatar ? "Uploading avatar..." : "Click to change avatar"
-          }
-        >
-          {avatarObjectUrl ? (
-            <img
-              src={avatarObjectUrl}
-              alt={displayName}
-              onLoad={handleAvatarLoad}
-              onError={() => handleAvatarError(avatarObjectUrl)}
-              className="w-full h-full object-cover"
-            />
-          ) : isLoadingAvatar ? (
-            <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-          ) : (
-            <UserIcon className="w-10 h-10 text-slate-400" />
-          )}
+      {/* Avatar Container & Action Row */}
+      <div className="flex items-center justify-between gap-4">
+        <div className="relative w-20 h-20 shrink-0">
+          <div
+            onClick={handleTriggerUpload}
+            className={`w-20 h-20 rounded-full bg-slate-100 ring-4 ring-slate-50 flex items-center justify-center shrink-0 text-slate-400 overflow-hidden relative ${
+              isUploadingAvatar || removing
+                ? "cursor-not-allowed"
+                : "cursor-pointer group"
+            }`}
+            title={
+              isUploadingAvatar
+                ? "Uploading avatar..."
+                : removing
+                  ? "Removing avatar..."
+                  : "Click to change avatar"
+            }
+          >
+            {avatarObjectUrl ? (
+              <img
+                src={avatarObjectUrl}
+                alt={displayName}
+                onLoad={handleAvatarLoad}
+                onError={() => handleAvatarError(avatarObjectUrl)}
+                className="w-full h-full object-cover"
+              />
+            ) : isLoadingAvatar ? (
+              <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+            ) : (
+              <UserIcon className="w-10 h-10 text-slate-400" />
+            )}
 
-          {/* Uploading Overlay Spinner */}
-          {isUploadingAvatar && (
-            <div
-              data-testid="avatar-uploading-overlay"
-              className="absolute inset-0 bg-slate-900/50 flex items-center justify-center text-white backdrop-blur-2xs"
-            >
-              <Loader2 className="w-6 h-6 animate-spin text-white" />
-            </div>
-          )}
+            {/* Uploading Overlay Spinner */}
+            {isUploadingAvatar && (
+              <div
+                data-testid="avatar-uploading-overlay"
+                className="absolute inset-0 bg-slate-900/50 flex items-center justify-center text-white backdrop-blur-2xs"
+              >
+                <Loader2 className="w-6 h-6 animate-spin text-white" />
+              </div>
+            )}
+          </div>
+
+          {/* Upload / Camera Trigger Button */}
+          <button
+            type="button"
+            onClick={handleTriggerUpload}
+            disabled={isUploadingAvatar}
+            aria-label={
+              isUploadingAvatar
+                ? "Uploading avatar..."
+                : "Upload profile avatar"
+            }
+            className="absolute -bottom-1 -right-1 p-2 rounded-full bg-[#1877f2] hover:bg-[#166fe5] text-white shadow-md ring-2 ring-white transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed focus:outline-hidden focus:ring-2 focus:ring-[#1877f2]/50"
+          >
+            {isUploadingAvatar ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Camera className="w-3.5 h-3.5" />
+            )}
+          </button>
+
+          {/* Hidden File Input */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            onChange={handleFileChange}
+            disabled={isUploadingAvatar}
+            className="hidden"
+            data-testid="avatar-file-input"
+            aria-label="Upload profile avatar"
+          />
         </div>
 
-        {/* Upload / Camera Trigger Button */}
-        <button
-          type="button"
-          onClick={handleTriggerUpload}
-          disabled={isUploadingAvatar}
-          aria-label={
-            isUploadingAvatar ? "Uploading avatar..." : "Upload profile avatar"
-          }
-          className="absolute -bottom-1 -right-1 p-2 rounded-full bg-[#1877f2] hover:bg-[#166fe5] text-white shadow-md ring-2 ring-white transition-all cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed focus:outline-hidden focus:ring-2 focus:ring-[#1877f2]/50"
-        >
-          {isUploadingAvatar ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <Camera className="w-3.5 h-3.5" />
-          )}
-        </button>
-
-        {/* Hidden File Input */}
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          onChange={handleFileChange}
-          disabled={isUploadingAvatar}
-          className="hidden"
-          data-testid="avatar-file-input"
-          aria-label="Upload profile avatar"
-        />
+        {/* Remove Photo Action: Only shown when a saved avatar exists */}
+        {hasSavedAvatar && (
+          <button
+            type="button"
+            data-testid="remove-avatar-button"
+            onClick={() => {
+              void handleRemovePhotoClick();
+            }}
+            disabled={removing || isUploadingAvatar}
+            aria-label={removing ? "Removing photo..." : "Remove profile photo"}
+            className="text-xs font-semibold text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100/80 border border-red-200/80 px-3 py-1.5 rounded-lg transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+          >
+            {removing ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Removing...</span>
+              </>
+            ) : (
+              <span>Remove Photo</span>
+            )}
+          </button>
+        )}
       </div>
 
       {/* Identity & Headline */}

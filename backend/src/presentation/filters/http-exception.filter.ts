@@ -60,6 +60,18 @@ export class HttpExceptionFilter implements ExceptionFilter {
       } else {
         message = exception.message || 'Request failed';
       }
+    } else if (
+      (exception as { name?: string })?.name === 'MulterError' ||
+      (exception as { code?: string })?.code === 'LIMIT_FILE_SIZE'
+    ) {
+      const multerError = exception as { code?: string; message?: string };
+      if (multerError.code === 'LIMIT_FILE_SIZE') {
+        statusCode = HttpStatus.PAYLOAD_TOO_LARGE;
+        message = 'File size exceeds allowed limit';
+      } else {
+        statusCode = HttpStatus.BAD_REQUEST;
+        message = multerError.message || 'File upload error';
+      }
     } else {
       // Non-HttpException / Unexpected error: mask implementation details
       statusCode = HttpStatus.INTERNAL_SERVER_ERROR;

@@ -3,6 +3,7 @@ import {
   Get,
   Patch,
   Post,
+  Delete,
   Body,
   Inject,
   UseGuards,
@@ -18,6 +19,7 @@ import { RolesGuard } from '../guards/roles.guard';
 import { Roles } from '../decorators/roles.decorator';
 import { CurrentUser } from '../decorators/current-user.decorator';
 import { BypassResponseWrapper } from '../decorators/bypass-response-wrapper.decorator';
+import { ResponseMessage } from '../decorators/response-message.decorator';
 import { Role } from '../../domain/enums/role.enum';
 import { IGetRecruiterProfileUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-profile.use-case.interface';
 import { IUpdateRecruiterProfileUseCase } from '../../application/use-cases/recruiter-profile/interface/update-recruiter-profile.use-case.interface';
@@ -26,6 +28,10 @@ import {
   UploadRecruiterAvatarResult,
 } from '../../application/use-cases/recruiter-profile/interface/upload-recruiter-avatar.use-case.interface';
 import { IGetRecruiterAvatarUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-avatar.use-case.interface';
+import {
+  IRemoveRecruiterAvatarUseCase,
+  RemoveRecruiterAvatarResult,
+} from '../../application/use-cases/recruiter-profile/interface/remove-recruiter-avatar.use-case.interface';
 import { IUpdateRecruiterPersonalProfileUseCase } from '../../application/use-cases/recruiter-profile/interface/update-recruiter-personal-profile.use-case.interface';
 import { IGetRecruiterCompanyUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-company.use-case.interface';
 import { IUpdateRecruiterCompanyUseCase } from '../../application/use-cases/recruiter-profile/interface/update-recruiter-company.use-case.interface';
@@ -34,6 +40,10 @@ import {
   UploadRecruiterCompanyLogoResult,
 } from '../../application/use-cases/recruiter-profile/interface/upload-recruiter-company-logo.use-case.interface';
 import { IGetRecruiterCompanyLogoUseCase } from '../../application/use-cases/recruiter-profile/interface/get-recruiter-company-logo.use-case.interface';
+import {
+  IRemoveRecruiterCompanyLogoUseCase,
+  RemoveRecruiterCompanyLogoResult,
+} from '../../application/use-cases/recruiter-profile/interface/remove-recruiter-company-logo.use-case.interface';
 import { CompanyResponseDto } from '../../application/dto/recruiter-profile/company-response.dto';
 import { UpdateCompanyInputDto } from '../../application/dto/recruiter-profile/update-company-input.dto';
 import { UpdateRecruiterProfileInputDto } from '../../application/dto/recruiter-profile/update-recruiter-profile-input.dto';
@@ -65,6 +75,8 @@ export class RecruiterProfileController {
     private readonly uploadRecruiterAvatarUseCase: IUploadRecruiterAvatarUseCase,
     @Inject(IGetRecruiterAvatarUseCase)
     private readonly getRecruiterAvatarUseCase: IGetRecruiterAvatarUseCase,
+    @Inject(IRemoveRecruiterAvatarUseCase)
+    private readonly removeRecruiterAvatarUseCase: IRemoveRecruiterAvatarUseCase,
     @Inject(IGetRecruiterCompanyUseCase)
     private readonly getRecruiterCompanyUseCase: IGetRecruiterCompanyUseCase,
     @Inject(IUpdateRecruiterCompanyUseCase)
@@ -73,6 +85,8 @@ export class RecruiterProfileController {
     private readonly uploadRecruiterCompanyLogoUseCase: IUploadRecruiterCompanyLogoUseCase,
     @Inject(IGetRecruiterCompanyLogoUseCase)
     private readonly getRecruiterCompanyLogoUseCase: IGetRecruiterCompanyLogoUseCase,
+    @Inject(IRemoveRecruiterCompanyLogoUseCase)
+    private readonly removeRecruiterCompanyLogoUseCase: IRemoveRecruiterCompanyLogoUseCase,
   ) {}
 
   @Get('profile')
@@ -142,6 +156,14 @@ export class RecruiterProfileController {
     res.send(file.buffer);
   }
 
+  @Delete('profile/avatar')
+  @ResponseMessage('Avatar removed successfully')
+  async removeAvatar(
+    @CurrentUser('id') userId: string,
+  ): Promise<RemoveRecruiterAvatarResult> {
+    return this.removeRecruiterAvatarUseCase.execute(userId);
+  }
+
   @Get('company')
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles(Role.RECRUITER)
@@ -197,5 +219,13 @@ export class RecruiterProfileController {
     res.setHeader('Content-Type', file.contentType);
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.send(file.buffer);
+  }
+
+  @Delete('company/logo')
+  @ResponseMessage('Company logo removed successfully')
+  async removeCompanyLogo(
+    @CurrentUser('id') userId: string,
+  ): Promise<RemoveRecruiterCompanyLogoResult> {
+    return this.removeRecruiterCompanyLogoUseCase.execute(userId);
   }
 }

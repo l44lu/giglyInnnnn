@@ -1,32 +1,58 @@
 import React, { useState, useEffect, useMemo } from "react";
 import axios from "axios";
 import { X, Plus } from "lucide-react";
-import {
-  getSkillCatalog,
-  getWorkerSkills,
-  updateWorkerSkills,
-} from "@/lib/worker-api";
+import { getSkillCatalog, getWorkerSkills } from "@/lib/worker-api";
 import type { Skill, WorkerSkill } from "@/types/worker-profile";
-import Swal from "sweetalert2";
 
-const Toast = Swal.mixin({
-  toast: true,
-  position: "top-end",
-  showConfirmButton: false,
-  timer: 3000,
-  timerProgressBar: true,
-});
+export interface WorkerSkillsCardProps {
+  skillsCatalog?: Skill[];
+  savedSkills?: WorkerSkill[];
+  draftSkillIds?: string[];
+  onAddSkill?: (skillId: string) => void;
+  onRemoveSkill?: (skillId: string) => void;
+  isEditingDetails?: boolean;
+  isSavingDetails?: boolean;
+  isLoadingSkills?: boolean;
+  skillsError?: string | null;
+  onRetrySkills?: () => void;
+}
 
-export const WorkerSkillsCard: React.FC = () => {
-  const [isEditingSkills, setIsEditingSkills] = useState(false);
-  const [skillsCatalog, setSkillsCatalog] = useState<Skill[]>([]);
-  const [savedSkills, setSavedSkills] = useState<WorkerSkill[]>([]);
-  const [draftSkillIds, setDraftSkillIds] = useState<string[]>([]);
-  const [selectedSkillToAdd, setSelectedSkillToAdd] = useState<string>("");
-  const [isLoadingSkills, setIsLoadingSkills] = useState<boolean>(true);
-  const [isSavingSkills, setIsSavingSkills] = useState<boolean>(false);
-  const [skillsError, setSkillsError] = useState<string | null>(null);
+export const WorkerSkillsCard: React.FC<WorkerSkillsCardProps> = ({
+  skillsCatalog: propSkillsCatalog,
+  savedSkills: propSavedSkills,
+  draftSkillIds: propDraftSkillIds,
+  onAddSkill,
+  onRemoveSkill,
+  isEditingDetails = false,
+  isSavingDetails = false,
+  isLoadingSkills: propIsLoadingSkills,
+  skillsError: propSkillsError,
+  onRetrySkills,
+}) => {
+  // Uncontrolled fallback states if rendered standalone
+  const [localSkillsCatalog, setLocalSkillsCatalog] = useState<Skill[]>([]);
+  const [localSavedSkills, setLocalSavedSkills] = useState<WorkerSkill[]>([]);
+  const [localDraftSkillIds, setLocalDraftSkillIds] = useState<string[]>([]);
+  const [localIsLoadingSkills, setLocalIsLoadingSkills] = useState<boolean>(
+    propSavedSkills === undefined,
+  );
+  const [localSkillsError, setLocalSkillsError] = useState<string | null>(null);
   const [skillsRetryCount, setSkillsRetryCount] = useState<number>(0);
+
+  const [selectedSkillToAdd, setSelectedSkillToAdd] = useState<string>("");
+
+  const skillsCatalog =
+    propSkillsCatalog !== undefined ? propSkillsCatalog : localSkillsCatalog;
+  const savedSkills =
+    propSavedSkills !== undefined ? propSavedSkills : localSavedSkills;
+  const draftSkillIds =
+    propDraftSkillIds !== undefined ? propDraftSkillIds : localDraftSkillIds;
+  const isLoadingSkills =
+    propIsLoadingSkills !== undefined
+      ? propIsLoadingSkills
+      : localIsLoadingSkills;
+  const skillsError =
+    propSkillsError !== undefined ? propSkillsError : localSkillsError;
 
   const catalogSkillMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -41,19 +67,25 @@ export const WorkerSkillsCard: React.FC = () => {
     return skillsCatalog.filter((skill) => !selectedSet.has(skill.id));
   }, [skillsCatalog, draftSkillIds]);
 
+  // Fetch skills on mount if uncontrolled / not provided as props
   useEffect(() => {
-    let isMounted = true;
+    if (propSavedSkills !== undefined && propSkillsCatalog !== undefined) {
+      return;
+    }
 
+    let isMounted = true;
     const fetchSkills = async () => {
+      setLocalIsLoadingSkills(true);
+      setLocalSkillsError(null);
       try {
         const [catalogData, workerSkillsData] = await Promise.all([
           getSkillCatalog(),
           getWorkerSkills(),
         ]);
         if (isMounted) {
-          setSkillsCatalog(catalogData);
-          setSavedSkills(workerSkillsData);
-          setSkillsError(null);
+          setLocalSkillsCatalog(catalogData);
+          setLocalSavedSkills(workerSkillsData);
+          setLocalDraftSkillIds(workerSkillsData.map((s) => s.skillId));
         }
       } catch (err: unknown) {
         if (isMounted) {
@@ -61,16 +93,16 @@ export const WorkerSkillsCard: React.FC = () => {
             const resData = err.response?.data as
               | { message?: string }
               | undefined;
-            setSkillsError(
+            setLocalSkillsError(
               resData?.message || "Failed to load skills. Please try again.",
             );
           } else {
-            setSkillsError("Failed to load skills. Please try again.");
+            setLocalSkillsError("Failed to load skills. Please try again.");
           }
         }
       } finally {
         if (isMounted) {
-          setIsLoadingSkills(false);
+          setLocalIsLoadingSkills(false);
         }
       }
     };
@@ -80,72 +112,39 @@ export const WorkerSkillsCard: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [skillsRetryCount]);
+  }, [propSavedSkills, propSkillsCatalog, skillsRetryCount]);
 
   const handleRetrySkills = () => {
+    if (onRetrySkills) {
+      onRetrySkills();
+      return;
+    }
     if (isLoadingSkills) return;
-    setSkillsError(null);
-    setIsLoadingSkills(true);
+    setLocalSkillsError(null);
+    setLocalIsLoadingSkills(true);
     setSkillsRetryCount((prev) => prev + 1);
   };
 
-  const handleStartEditingSkills = () => {
-    if (isLoadingSkills) return;
-    setDraftSkillIds(savedSkills.map((s) => s.skillId));
-    setSelectedSkillToAdd("");
-    setSkillsError(null);
-    setIsEditingSkills(true);
-  };
-
-  const handleCancelSkills = () => {
-    setDraftSkillIds(savedSkills.map((s) => s.skillId));
-    setSelectedSkillToAdd("");
-    setSkillsError(null);
-    setIsEditingSkills(false);
-  };
-
   const handleAddSkill = () => {
-    if (!selectedSkillToAdd || isSavingSkills) return;
+    if (!selectedSkillToAdd || isSavingDetails) return;
     if (draftSkillIds.includes(selectedSkillToAdd)) return;
-    setDraftSkillIds((prev) => [...prev, selectedSkillToAdd]);
+
+    if (onAddSkill) {
+      onAddSkill(selectedSkillToAdd);
+    } else {
+      setLocalDraftSkillIds((prev) => [...prev, selectedSkillToAdd]);
+    }
     setSelectedSkillToAdd("");
-    setSkillsError(null);
   };
 
   const handleRemoveSkill = (skillIdToRemove: string) => {
-    if (isSavingSkills) return;
-    setDraftSkillIds((prev) => prev.filter((id) => id !== skillIdToRemove));
-  };
-
-  const handleSaveSkills = async () => {
-    if (isSavingSkills) return;
-    setIsSavingSkills(true);
-    setSkillsError(null);
-
-    try {
-      const updatedSkills = await updateWorkerSkills(draftSkillIds);
-      setSavedSkills(updatedSkills);
-      setDraftSkillIds(updatedSkills.map((s) => s.skillId));
-      setSelectedSkillToAdd("");
-      setIsEditingSkills(false);
-      void Toast.fire({
-        icon: "success",
-        title: "Skills updated successfully",
-      });
-    } catch (err: unknown) {
-      if (axios.isAxiosError(err)) {
-        const resData = err.response?.data as
-          | { message?: string | string[] }
-          | undefined;
-        const msg = Array.isArray(resData?.message)
-          ? resData.message.join(", ")
-          : resData?.message;
-        setSkillsError(msg || "Failed to update skills. Please try again.");
-      } else {
-        setSkillsError("Failed to update skills. Please try again.");
-      }
-    } finally {
-      setIsSavingSkills(false);
+    if (isSavingDetails) return;
+    if (onRemoveSkill) {
+      onRemoveSkill(skillIdToRemove);
+    } else {
+      setLocalDraftSkillIds((prev) =>
+        prev.filter((id) => id !== skillIdToRemove),
+      );
     }
   };
 
@@ -161,40 +160,6 @@ export const WorkerSkillsCard: React.FC = () => {
             for.
           </p>
         </div>
-        {!isEditingSkills ? (
-          <button
-            type="button"
-            onClick={handleStartEditingSkills}
-            disabled={isLoadingSkills}
-            className="text-sm font-semibold text-[#1877f2] hover:text-[#166fe5] transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-            aria-label="Edit skills"
-          >
-            Edit
-          </button>
-        ) : (
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={handleCancelSkills}
-              disabled={isSavingSkills}
-              className="text-xs sm:text-sm font-semibold text-slate-600 hover:text-slate-800 px-3 py-1.5 rounded-xl border border-slate-200/90 hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed shadow-2xs"
-              aria-label="Cancel skills editing"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void handleSaveSkills();
-              }}
-              disabled={isSavingSkills}
-              className="text-xs sm:text-sm font-semibold text-white bg-[#1877f2] hover:bg-[#166fe5] px-3.5 py-1.5 rounded-xl shadow-xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-              aria-label="Save skills"
-            >
-              {isSavingSkills ? "Saving..." : "Save"}
-            </button>
-          </div>
-        )}
       </div>
 
       {skillsError && (
@@ -203,23 +168,13 @@ export const WorkerSkillsCard: React.FC = () => {
           className="mt-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs sm:text-sm flex items-center justify-between shadow-2xs"
         >
           <span>{skillsError}</span>
-          {isLoadingSkills ? (
-            <button
-              type="button"
-              onClick={handleRetrySkills}
-              className="text-red-700 hover:text-red-900 font-semibold underline text-xs ml-3 cursor-pointer shrink-0"
-            >
-              Retry
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setSkillsError(null)}
-              className="text-red-500 hover:text-red-700 text-xs font-semibold ml-3 cursor-pointer shrink-0"
-            >
-              Dismiss
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={handleRetrySkills}
+            className="text-red-700 hover:text-red-900 font-semibold underline text-xs ml-3 cursor-pointer shrink-0"
+          >
+            Retry
+          </button>
         </div>
       )}
 
@@ -237,7 +192,7 @@ export const WorkerSkillsCard: React.FC = () => {
             Core skills
           </h4>
 
-          {!isEditingSkills ? (
+          {!isEditingDetails ? (
             savedSkills.length === 0 ? (
               <p className="text-xs text-slate-400 italic">
                 No skills added yet.
@@ -275,8 +230,8 @@ export const WorkerSkillsCard: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => handleRemoveSkill(skillId)}
-                            disabled={isSavingSkills}
-                            className="hover:text-red-600 transition-colors cursor-pointer"
+                            disabled={isSavingDetails}
+                            className="hover:text-red-600 transition-colors cursor-pointer disabled:opacity-50"
                             aria-label={`Remove ${skillName}`}
                           >
                             <X className="w-3.5 h-3.5" />
@@ -293,7 +248,7 @@ export const WorkerSkillsCard: React.FC = () => {
                   value={selectedSkillToAdd}
                   onChange={(e) => setSelectedSkillToAdd(e.target.value)}
                   disabled={
-                    isSavingSkills || availableCatalogOptions.length === 0
+                    isSavingDetails || availableCatalogOptions.length === 0
                   }
                   className="w-full sm:w-auto sm:min-w-[260px] bg-white border border-slate-200/90 rounded-xl px-3.5 py-2 text-xs sm:text-sm text-slate-800 shadow-2xs focus:outline-hidden focus:ring-2 focus:ring-[#1877f2]/20 focus:border-[#1877f2] transition-colors disabled:bg-slate-50 disabled:cursor-not-allowed cursor-pointer"
                   aria-label="Select skill to add"
@@ -313,7 +268,7 @@ export const WorkerSkillsCard: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleAddSkill}
-                  disabled={!selectedSkillToAdd || isSavingSkills}
+                  disabled={!selectedSkillToAdd || isSavingDetails}
                   className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs sm:text-sm font-semibold bg-slate-900 hover:bg-slate-800 text-white shadow-2xs transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   aria-label="Add skill"
                 >
@@ -328,3 +283,5 @@ export const WorkerSkillsCard: React.FC = () => {
     </div>
   );
 };
+
+export default WorkerSkillsCard;

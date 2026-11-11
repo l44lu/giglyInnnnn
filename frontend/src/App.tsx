@@ -7,8 +7,12 @@ import Signup from "./pages/Signup";
 import ForgotPassword from "./pages/ForgotPassword";
 import WorkerDashboard from "./pages/worker/WorkerDashboard";
 import WorkerProfile from "./pages/worker/WorkerProfile";
+import FindJobs from "./pages/worker/FindJobs";
 import RecruiterDashboard from "./pages/recruiter/RecruiterDashboard";
 import RecruiterProfile from "./pages/recruiter/RecruiterProfile";
+import PostJob from "./pages/recruiter/PostJob";
+import EditJob from "./pages/recruiter/EditJob";
+import MyPostings from "./pages/recruiter/MyPostings";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminWorkers from "./pages/admin/AdminWorkers";
 import AdminRecruiters from "./pages/admin/AdminRecruiters";
@@ -30,6 +34,14 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["WORKER"]}>
                 <WorkerDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/worker/find-jobs"
+            element={
+              <ProtectedRoute allowedRoles={["WORKER"]}>
+                <FindJobs />
               </ProtectedRoute>
             }
           />
@@ -56,6 +68,30 @@ function App() {
             element={
               <ProtectedRoute allowedRoles={["RECRUITER"]}>
                 <RecruiterProfile />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruiter/post-job"
+            element={
+              <ProtectedRoute allowedRoles={["RECRUITER"]}>
+                <PostJob />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruiter/my-postings"
+            element={
+              <ProtectedRoute allowedRoles={["RECRUITER"]}>
+                <MyPostings />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/recruiter/jobs/:id/edit"
+            element={
+              <ProtectedRoute allowedRoles={["RECRUITER"]}>
+                <EditJob />
               </ProtectedRoute>
             }
           />
