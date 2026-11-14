@@ -3,10 +3,12 @@ import {
   ApplicationValidationError,
   ApplicationNotFoundError,
   ApplicationAuthorizationError,
+  ApplicationConflictError,
 } from '../../../errors/application.errors';
 import { IJobPostRepository } from '../../../../domain/repositories/job-post.repository.interface';
 import { IJobCategoryRepository } from '../../../../domain/repositories/job-category.repository.interface';
 import { ISkillRepository } from '../../../../domain/repositories/skill.repository.interface';
+import { IJobApplicationRepository } from '../../../../domain/repositories/job-application.repository.interface';
 import { JobPostEntity } from '../../../../domain/entities/job-post.entity';
 import { JobStatus } from '../../../../domain/enums/job-status.enum';
 import { WorkType } from '../../../../domain/enums/work-type.enum';
@@ -25,6 +27,8 @@ export class UpdateJobPostUseCase implements IUpdateJobPostUseCase {
     private readonly jobCategoryRepository: IJobCategoryRepository,
     @Inject(ISkillRepository)
     private readonly skillRepository: ISkillRepository,
+    @Inject(IJobApplicationRepository)
+    private readonly jobApplicationRepository: IJobApplicationRepository,
   ) {}
 
   async execute(
@@ -233,13 +237,39 @@ export class UpdateJobPostUseCase implements IUpdateJobPostUseCase {
       }
     }
 
+    // 11.5 Guard workersNeeded reductions against accepted applications
+    const targetWorkersNeeded =
+      dto.workersNeeded !== undefined
+        ? dto.workersNeeded
+        : existingJobPost.workersNeeded;
+
+    if (targetWorkersNeeded < existingJobPost.workersNeeded) {
+      const applicationsSummary =
+        await this.jobApplicationRepository.findByJobPostId({
+          jobPostId: trimmedJobId,
+          page: 1,
+          limit: 1,
+        });
+
+      if (!applicationsSummary) {
+        throw new ApplicationNotFoundError('Job post not found');
+      }
+
+      const acceptedCount = applicationsSummary.summary.accepted;
+      if (targetWorkersNeeded < acceptedCount) {
+        throw new ApplicationConflictError(
+          `Cannot reduce workersNeeded to ${targetWorkersNeeded} because ${acceptedCount} application${acceptedCount === 1 ? ' has' : 's have'} already been accepted`,
+        );
+      }
+    }
+
     // 12. Assemble update data without accepting protected fields from client
     const updateData: Partial<JobPostEntity> = {
       categoryId: dto.categoryId.trim(),
       title: dto.title.trim(),
       description: dto.description.trim(),
       workType: dto.workType,
-      workersNeeded: dto.workersNeeded !== undefined ? dto.workersNeeded : 1,
+      workersNeeded: targetWorkersNeeded,
       startDate: parsedStartDate,
       estimatedDuration: dto.estimatedDuration ?? null,
       shiftDuration: dto.shiftDuration ?? null,

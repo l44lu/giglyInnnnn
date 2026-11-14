@@ -146,6 +146,7 @@ describe('GetWorkerJobDetailsUseCase', () => {
     expect(result.recruiter?.bio).toBe(
       'Hospitality and event staffing recruiter.',
     );
+    expect(result.recruiter?.yearsExperience).toBe(7);
   });
 
   it('strictly excludes private, sensitive, and internal database fields from output', async () => {
@@ -237,5 +238,21 @@ describe('GetWorkerJobDetailsUseCase', () => {
     expect(result.recruiter?.avatarUrl).toBeNull();
     expect(result.recruiter?.location).toBeNull();
     expect(result.recruiter?.bio).toBeNull();
+    expect(result.recruiter?.yearsExperience).toBeNull();
+  });
+
+  it('maps recruiter yearsExperience to null when unavailable on entity', async () => {
+    const jobWithNoExp = new JobPostEntity({
+      ...mockOpenJob,
+      recruiter: new RecruiterProfileEntity({
+        ...mockOpenJob.recruiter,
+        yearsExperience: null,
+      }),
+    });
+    jobPostRepository.findOpenJobById.mockResolvedValueOnce(jobWithNoExp);
+
+    const result = await useCase.execute('job-uuid-1');
+
+    expect(result.recruiter?.yearsExperience).toBeNull();
   });
 });

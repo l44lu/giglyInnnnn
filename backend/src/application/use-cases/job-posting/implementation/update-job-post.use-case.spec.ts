@@ -2,6 +2,10 @@ import { UpdateJobPostUseCase } from './update-job-post.use-case';
 import { IJobPostRepository } from '../../../../domain/repositories/job-post.repository.interface';
 import { IJobCategoryRepository } from '../../../../domain/repositories/job-category.repository.interface';
 import { ISkillRepository } from '../../../../domain/repositories/skill.repository.interface';
+import {
+  FindJobApplicationsResult,
+  IJobApplicationRepository,
+} from '../../../../domain/repositories/job-application.repository.interface';
 import { JobPostEntity } from '../../../../domain/entities/job-post.entity';
 import { JobCategoryEntity } from '../../../../domain/entities/job-category.entity';
 import { SkillEntity } from '../../../../domain/entities/skill.entity';
@@ -13,6 +17,7 @@ import {
   ApplicationValidationError,
   ApplicationNotFoundError,
   ApplicationAuthorizationError,
+  ApplicationConflictError,
 } from '../../../errors/application.errors';
 
 describe('UpdateJobPostUseCase', () => {
@@ -20,6 +25,7 @@ describe('UpdateJobPostUseCase', () => {
   let jobPostRepository: jest.Mocked<IJobPostRepository>;
   let jobCategoryRepository: jest.Mocked<IJobCategoryRepository>;
   let skillRepository: jest.Mocked<ISkillRepository>;
+  let jobApplicationRepository: jest.Mocked<IJobApplicationRepository>;
 
   const mockJobId = 'job-post-uuid-1';
   const mockRecruiterId = 'recruiter-profile-uuid-1';
@@ -133,10 +139,48 @@ describe('UpdateJobPostUseCase', () => {
       delete: jest.fn(),
     };
 
+    jobApplicationRepository = {
+      create: jest.fn(),
+      findByJobAndWorker: jest.fn(),
+      findByJobPostId: jest.fn().mockResolvedValue({
+        job: {
+          id: mockJobId,
+          title: 'Festival Barista',
+          status: JobStatus.OPEN,
+          workersNeeded: 2,
+          workType: WorkType.LOCAL,
+          paymentStructure: PaymentStructure.HOURLY,
+          budgetAmount: null,
+          hourlyRate: 25,
+          acceptedCount: 0,
+        },
+        items: [],
+        total: 0,
+        page: 1,
+        limit: 1,
+        summary: {
+          total: 0,
+          pending: 0,
+          shortlisted: 0,
+          accepted: 0,
+          rejected: 0,
+          withdrawn: 0,
+        },
+      } satisfies FindJobApplicationsResult),
+      shortlistApplication: jest.fn(),
+      rejectApplication: jest.fn(),
+      acceptApplication: jest.fn(),
+      findById: jest.fn(),
+      findAll: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+    };
+
     useCase = new UpdateJobPostUseCase(
       jobPostRepository,
       jobCategoryRepository,
       skillRepository,
+      jobApplicationRepository,
     );
   });
 
@@ -649,6 +693,151 @@ describe('UpdateJobPostUseCase', () => {
       expect((passedData as any).recruiterId).toBeUndefined();
       expect((passedData as any).status).toBeUndefined();
       expect((passedData as any).isBoosted).toBeUndefined();
+    });
+  });
+
+  describe('7. workersNeeded Capacity Edit Guard', () => {
+    const createApplicationsSummary = (
+      accepted: number,
+      workersNeeded = 4,
+    ): FindJobApplicationsResult => ({
+      job: {
+        id: mockJobId,
+        title: 'Festival Barista',
+        status: JobStatus.OPEN,
+        workersNeeded,
+        workType: WorkType.LOCAL,
+        paymentStructure: PaymentStructure.HOURLY,
+        budgetAmount: null,
+        hourlyRate: 25,
+        acceptedCount: accepted,
+      },
+      items: [],
+      total: accepted,
+      page: 1,
+      limit: 1,
+      summary: {
+        total: accepted,
+        pending: 0,
+        shortlisted: 0,
+        accepted,
+        rejected: 0,
+        withdrawn: 0,
+      },
+    });
+
+    it('does not query accepted count when workersNeeded is unchanged or omitted', async () => {
+      jobPostRepository.findByIdWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 3 }),
+      );
+      jobPostRepository.updateWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 3 }),
+      );
+
+      await useCase.execute(
+        mockJobId,
+        mockRecruiterId,
+        createValidDto({ workersNeeded: 3 }),
+      );
+      expect(jobApplicationRepository.findByJobPostId).not.toHaveBeenCalled();
+
+      jobPostRepository.findByIdWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 3 }),
+      );
+      jobPostRepository.updateWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 3 }),
+      );
+
+      await useCase.execute(
+        mockJobId,
+        mockRecruiterId,
+        createValidDto({ workersNeeded: undefined }),
+      );
+      expect(jobApplicationRepository.findByJobPostId).not.toHaveBeenCalled();
+      expect(jobPostRepository.updateWithSkills).toHaveBeenLastCalledWith(
+        mockJobId,
+        expect.objectContaining({ workersNeeded: 3 }),
+        ['skill-uuid-1', 'skill-uuid-2'],
+      );
+    });
+
+    it('rejects reducing workersNeeded below the accepted application count', async () => {
+      jobPostRepository.findByIdWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 4 }),
+      );
+      jobApplicationRepository.findByJobPostId.mockResolvedValueOnce(
+        createApplicationsSummary(3, 4),
+      );
+
+      const promise = useCase.execute(
+        mockJobId,
+        mockRecruiterId,
+        createValidDto({ workersNeeded: 2 }),
+      );
+
+      await expect(promise).rejects.toThrow(ApplicationConflictError);
+      await expect(promise).rejects.toThrow(
+        'Cannot reduce workersNeeded to 2 because 3 applications have already been accepted',
+      );
+      expect(jobApplicationRepository.findByJobPostId).toHaveBeenCalledWith({
+        jobPostId: mockJobId,
+        page: 1,
+        limit: 1,
+      });
+      expect(jobPostRepository.updateWithSkills).not.toHaveBeenCalled();
+    });
+
+    it('allows reducing workersNeeded to equal the accepted application count', async () => {
+      jobPostRepository.findByIdWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 4 }),
+      );
+      jobApplicationRepository.findByJobPostId.mockResolvedValueOnce(
+        createApplicationsSummary(2, 4),
+      );
+      jobPostRepository.updateWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 2 }),
+      );
+
+      const result = await useCase.execute(
+        mockJobId,
+        mockRecruiterId,
+        createValidDto({ workersNeeded: 2 }),
+      );
+
+      expect(jobApplicationRepository.findByJobPostId).toHaveBeenCalledWith({
+        jobPostId: mockJobId,
+        page: 1,
+        limit: 1,
+      });
+      expect(jobPostRepository.updateWithSkills).toHaveBeenCalledWith(
+        mockJobId,
+        expect.objectContaining({ workersNeeded: 2 }),
+        ['skill-uuid-1', 'skill-uuid-2'],
+      );
+      expect(result.workersNeeded).toBe(2);
+    });
+
+    it('allows increasing workersNeeded without rejecting', async () => {
+      jobPostRepository.findByIdWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 2 }),
+      );
+      jobPostRepository.updateWithSkills.mockResolvedValueOnce(
+        createMockJob({ status: JobStatus.OPEN, workersNeeded: 5 }),
+      );
+
+      const result = await useCase.execute(
+        mockJobId,
+        mockRecruiterId,
+        createValidDto({ workersNeeded: 5 }),
+      );
+
+      expect(jobApplicationRepository.findByJobPostId).not.toHaveBeenCalled();
+      expect(jobPostRepository.updateWithSkills).toHaveBeenCalledWith(
+        mockJobId,
+        expect.objectContaining({ workersNeeded: 5 }),
+        ['skill-uuid-1', 'skill-uuid-2'],
+      );
+      expect(result.workersNeeded).toBe(5);
     });
   });
 });

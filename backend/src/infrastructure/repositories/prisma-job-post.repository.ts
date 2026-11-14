@@ -12,8 +12,13 @@ import { CompanyEntity } from '../../domain/entities/company.entity';
 import { RecruiterProfileEntity } from '../../domain/entities/recruiter-profile.entity';
 import { UserEntities } from '../../domain/entities/user.entities';
 import { JobStatus } from '../../domain/enums/job-status.enum';
+import { JobApplicationStatus } from '../../domain/enums/job-application-status.enum';
 import { WorkType } from '../../domain/enums/work-type.enum';
 import { PaymentStructure } from '../../domain/enums/payment-structure.enum';
+import {
+  ApplicationConflictError,
+  ApplicationNotFoundError,
+} from '../../application/errors/application.errors';
 import { PrismaService } from '../prisma/prisma.service';
 import {
   JobPost,
@@ -292,6 +297,49 @@ export class PrismaJobPostRepository
     skillIds: string[],
   ): Promise<JobPostEntity> {
     return await this.prisma.$transaction(async (tx) => {
+      // Lock the target JobPost row first to serialize edits with concurrent acceptApplication transactions
+      const lockedJobs = await tx.$queryRaw<
+        Array<{ id: string; status: string; workersNeeded: number }>
+      >`
+        SELECT "id", "status", "workersNeeded"
+        FROM "JobPost"
+        WHERE "id" = ${id}
+        FOR UPDATE
+      `;
+
+      const lockedJob = lockedJobs[0];
+      if (!lockedJob) {
+        throw new ApplicationNotFoundError('Job post not found');
+      }
+
+      if (
+        lockedJob.status === JobStatus.FILLED ||
+        lockedJob.status === JobStatus.COMPLETED ||
+        lockedJob.status === JobStatus.CANCELLED
+      ) {
+        throw new ApplicationConflictError(
+          `Cannot edit job post with status: ${lockedJob.status}`,
+        );
+      }
+
+      if (
+        data.workersNeeded !== undefined &&
+        data.workersNeeded < lockedJob.workersNeeded
+      ) {
+        const acceptedCount = await tx.jobApplication.count({
+          where: {
+            jobPostId: id,
+            status: JobApplicationStatus.ACCEPTED,
+          },
+        });
+
+        if (data.workersNeeded < acceptedCount) {
+          throw new ApplicationConflictError(
+            `Cannot reduce workersNeeded to ${data.workersNeeded} because ${acceptedCount} application${acceptedCount === 1 ? ' has' : 's have'} already been accepted`,
+          );
+        }
+      }
+
       const resolvedHourlyRate =
         data.hourlyRate !== undefined
           ? data.hourlyRate

@@ -14,6 +14,8 @@ import {
   NotFoundException,
   ForbiddenException,
   ConflictException,
+  HttpCode,
+  HttpStatus,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
@@ -24,11 +26,14 @@ import { Role } from '../../domain/enums/role.enum';
 import { IFindOpenJobsUseCase } from '../../application/use-cases/job-discovery/interface/find-open-jobs.use-case.interface';
 import { IGetWorkerJobDetailsUseCase } from '../../application/use-cases/job-discovery/interface/get-worker-job-details.use-case.interface';
 import { IReportJobUseCase } from '../../application/use-cases/job-discovery/interface/report-job.use-case.interface';
+import { IApplyJobUseCase } from '../../application/use-cases/job-discovery/interface/apply-job.use-case.interface';
 import { FindJobsQueryDto } from '../../application/dto/job-discovery/find-jobs-query.dto';
 import { FindJobsResponseDto } from '../../application/dto/job-discovery/find-jobs-response.dto';
 import { WorkerJobDetailsResponseDto } from '../../application/dto/job-discovery/worker-job-details-response.dto';
 import { ReportJobInputDto } from '../../application/dto/job-discovery/report-job-input.dto';
 import { ReportJobResponseDto } from '../../application/dto/job-discovery/report-job-response.dto';
+import { ApplyJobInputDto } from '../../application/dto/job-discovery/apply-job-input.dto';
+import { JobApplicationResponseDto } from '../../application/dto/job-discovery/job-application-response.dto';
 import {
   ApplicationValidationError,
   ApplicationNotFoundError,
@@ -44,7 +49,6 @@ export interface UploadedMulterFile {
   size: number;
   buffer: Buffer;
 }
-
 @Controller('worker/jobs')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.WORKER)
@@ -56,6 +60,8 @@ export class JobDiscoveryController {
     private readonly getWorkerJobDetailsUseCase: IGetWorkerJobDetailsUseCase,
     @Inject(IReportJobUseCase)
     private readonly reportJobUseCase: IReportJobUseCase,
+    @Inject(IApplyJobUseCase)
+    private readonly applyJobUseCase: IApplyJobUseCase,
   ) {}
 
   private handleApplicationError(error: unknown): never {
@@ -122,6 +128,20 @@ export class JobDiscoveryController {
             }
           : undefined,
       });
+    } catch (error) {
+      this.handleApplicationError(error);
+    }
+  }
+
+  @Post(':id/apply')
+  @HttpCode(HttpStatus.CREATED)
+  async applyJob(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser('sub') userId: string,
+    @Body() dto?: ApplyJobInputDto,
+  ): Promise<JobApplicationResponseDto> {
+    try {
+      return await this.applyJobUseCase.execute(userId, id, dto);
     } catch (error) {
       this.handleApplicationError(error);
     }

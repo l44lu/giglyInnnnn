@@ -3,6 +3,7 @@ import {
   BadRequestException,
   NotFoundException,
   ForbiddenException,
+  ConflictException,
   UnauthorizedException,
   ExecutionContext,
   ValidationPipe,
@@ -25,6 +26,25 @@ import {
   ITransitionJobPostStatusUseCase,
   JobPostStatusAction,
 } from '../../application/use-cases/job-posting/interface/transition-job-post-status.use-case.interface';
+import { IGetJobApplicationsUseCase } from '../../application/use-cases/job-posting/interface/get-job-applications.use-case.interface';
+import { IShortlistJobApplicationUseCase } from '../../application/use-cases/job-posting/interface/shortlist-job-application.use-case.interface';
+import { IAcceptJobApplicationUseCase } from '../../application/use-cases/job-posting/interface/accept-job-application.use-case.interface';
+import { IRejectJobApplicationUseCase } from '../../application/use-cases/job-posting/interface/reject-job-application.use-case.interface';
+import { GetJobApplicationsQueryDto } from '../../application/dto/job-posting/get-job-applications-query.dto';
+import { UpdateJobApplicationStatusInputDto } from '../../application/dto/job-posting/update-job-application-status-input.dto';
+import {
+  ApplicantSkillDto,
+  ApplicantWorkerDto,
+  ApplicationHistorySummaryDto,
+  GetJobApplicationsResponseDto,
+  JobApplicationJobInfoDto,
+  JobApplicationsSummaryDto,
+  RecruiterJobApplicationItemDto,
+} from '../../application/dto/job-posting/job-applications-response.dto';
+import { PaginationMetadataDto } from '../../application/dto/job-discovery/find-jobs-response.dto';
+import { JobApplicationStatus } from '../../domain/enums/job-application-status.enum';
+import { JobApplicationReasonCode } from '../../domain/enums/job-application-reason-code.enum';
+import { JobApplicationSortBy } from '../../domain/repositories/job-application.repository.interface';
 import { JobCategoryResponseDto } from '../../application/dto/job-posting/job-category-response.dto';
 import { JobPostResponseDto } from '../../application/dto/job-posting/job-post-response.dto';
 import { CreateDraftJobPostInputDto } from '../../application/dto/job-posting/create-draft-job-post-input.dto';
@@ -49,6 +69,7 @@ import {
   ApplicationValidationError,
   ApplicationNotFoundError,
   ApplicationAuthorizationError,
+  ApplicationConflictError,
 } from '../../application/errors/application.errors';
 
 describe('JobPostingController', () => {
@@ -61,6 +82,10 @@ describe('JobPostingController', () => {
   let getRecruiterJobPostByIdUseCase: jest.Mocked<IGetRecruiterJobPostByIdUseCase>;
   let updateJobPostUseCase: jest.Mocked<IUpdateJobPostUseCase>;
   let transitionJobPostStatusUseCase: jest.Mocked<ITransitionJobPostStatusUseCase>;
+  let getJobApplicationsUseCase: jest.Mocked<IGetJobApplicationsUseCase>;
+  let shortlistJobApplicationUseCase: jest.Mocked<IShortlistJobApplicationUseCase>;
+  let acceptJobApplicationUseCase: jest.Mocked<IAcceptJobApplicationUseCase>;
+  let rejectJobApplicationUseCase: jest.Mocked<IRejectJobApplicationUseCase>;
   let reflector: Reflector;
   let rolesGuard: RolesGuard;
 
@@ -201,6 +226,18 @@ describe('JobPostingController', () => {
     transitionJobPostStatusUseCase = {
       execute: jest.fn(),
     };
+    getJobApplicationsUseCase = {
+      execute: jest.fn(),
+    };
+    shortlistJobApplicationUseCase = {
+      execute: jest.fn(),
+    };
+    acceptJobApplicationUseCase = {
+      execute: jest.fn(),
+    };
+    rejectJobApplicationUseCase = {
+      execute: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [JobPostingController],
@@ -236,6 +273,22 @@ describe('JobPostingController', () => {
         {
           provide: ITransitionJobPostStatusUseCase,
           useValue: transitionJobPostStatusUseCase,
+        },
+        {
+          provide: IGetJobApplicationsUseCase,
+          useValue: getJobApplicationsUseCase,
+        },
+        {
+          provide: IShortlistJobApplicationUseCase,
+          useValue: shortlistJobApplicationUseCase,
+        },
+        {
+          provide: IAcceptJobApplicationUseCase,
+          useValue: acceptJobApplicationUseCase,
+        },
+        {
+          provide: IRejectJobApplicationUseCase,
+          useValue: rejectJobApplicationUseCase,
         },
         {
           provide: IUserRepository,
@@ -2190,6 +2243,349 @@ describe('JobPostingController', () => {
         });
         expect(rolesGuard.canActivate(context)).toBe(true);
       });
+    });
+
+    describe('GET /recruiter/jobs/:id/applications (getJobApplications)', () => {
+      it('Unauthenticated: throws UnauthorizedException (401)', () => {
+        const context = createMockContext(controller.getJobApplications);
+        expect(() => rolesGuard.canActivate(context)).toThrow(
+          UnauthorizedException,
+        );
+      });
+
+      it('WORKER: throws ForbiddenException (403)', () => {
+        const context = createMockContext(controller.getJobApplications, {
+          id: 'worker-uuid-1',
+          email: 'worker@example.com',
+          role: Role.WORKER,
+        });
+        expect(() => rolesGuard.canActivate(context)).toThrow(
+          ForbiddenException,
+        );
+      });
+
+      it('ADMIN: throws ForbiddenException (403)', () => {
+        const context = createMockContext(controller.getJobApplications, {
+          id: 'admin-uuid-1',
+          email: 'admin@example.com',
+          role: Role.ADMIN,
+        });
+        expect(() => rolesGuard.canActivate(context)).toThrow(
+          ForbiddenException,
+        );
+      });
+
+      it('RECRUITER: allows access (returns true)', () => {
+        const context = createMockContext(controller.getJobApplications, {
+          id: 'recruiter-uuid-1',
+          email: 'recruiter@example.com',
+          role: Role.RECRUITER,
+        });
+        expect(rolesGuard.canActivate(context)).toBe(true);
+      });
+    });
+  });
+
+  describe('getJobApplications', () => {
+    const jobId = '11111111-1111-4111-8111-111111111111';
+    const userId = 'recruiter-user-uuid-1';
+
+    const sampleResponse = new GetJobApplicationsResponseDto({
+      job: new JobApplicationJobInfoDto({
+        id: jobId,
+        title: 'Warehouse Associate',
+        status: JobStatus.OPEN,
+        workersNeeded: 3,
+        workType: WorkType.LOCAL,
+        paymentStructure: PaymentStructure.HOURLY,
+        budgetAmount: null,
+        hourlyRate: 22,
+        acceptedCount: 1,
+      }),
+      summary: new JobApplicationsSummaryDto({
+        total: 2,
+        pending: 1,
+        shortlisted: 0,
+        accepted: 1,
+        rejected: 0,
+        withdrawn: 0,
+      }),
+      items: [
+        new RecruiterJobApplicationItemDto({
+          id: 'app-uuid-1',
+          jobPostId: jobId,
+          status: JobApplicationStatus.PENDING,
+          expectedPay: 24,
+          availableDate: new Date('2026-11-20T00:00:00.000Z'),
+          appliedAt: new Date('2026-11-11T10:00:00.000Z'),
+          updatedAt: new Date('2026-11-11T10:00:00.000Z'),
+          worker: new ApplicantWorkerDto({
+            id: 'worker-profile-uuid-1',
+            firstName: 'Ada',
+            lastName: 'Lovelace',
+            location: 'Austin, TX',
+            bio: 'Certified forklift operator',
+            headline: 'Senior Logistics Specialist',
+            yearsExperience: 5,
+            responseTimeHours: 2,
+            availabilityStatus: 'AVAILABLE',
+            isOpenToWork: true,
+            totalCompletedGigs: 12,
+            hasAvatar: true,
+            skills: [
+              new ApplicantSkillDto({
+                id: 'skill-uuid-1',
+                name: 'Forklift Operation',
+                skillType: 'primary',
+              }),
+            ],
+          }),
+          historySummary: new ApplicationHistorySummaryDto({
+            lastChangedAt: new Date('2026-11-11T10:00:00.000Z'),
+            latestReasonCode: JobApplicationReasonCode.APPLIED,
+            transitionCount: 1,
+          }),
+        }),
+      ],
+      pagination: new PaginationMetadataDto({
+        total: 2,
+        page: 1,
+        limit: 10,
+        totalPages: 1,
+      }),
+    });
+
+    it('forwards authenticated userId, jobId, and query to getJobApplicationsUseCase', async () => {
+      const query = new GetJobApplicationsQueryDto({
+        status: JobApplicationStatus.PENDING,
+        search: 'Ada',
+        page: 2,
+        limit: 15,
+        sortBy: JobApplicationSortBy.EXPECTED_PAY_ASC,
+      });
+      getJobApplicationsUseCase.execute.mockResolvedValue(sampleResponse);
+
+      const result = await controller.getJobApplications(jobId, userId, query);
+
+      expect(getJobApplicationsUseCase.execute).toHaveBeenCalledTimes(1);
+      expect(getJobApplicationsUseCase.execute).toHaveBeenCalledWith(
+        userId,
+        jobId,
+        query,
+      );
+      expect(result).toBe(sampleResponse);
+    });
+
+    it('maps ApplicationNotFoundError to NotFoundException', async () => {
+      getJobApplicationsUseCase.execute.mockRejectedValue(
+        new ApplicationNotFoundError('Job post not found'),
+      );
+
+      await expect(
+        controller.getJobApplications(
+          jobId,
+          userId,
+          new GetJobApplicationsQueryDto(),
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('maps ApplicationAuthorizationError to ForbiddenException', async () => {
+      getJobApplicationsUseCase.execute.mockRejectedValue(
+        new ApplicationAuthorizationError(
+          'You do not have permission to view applications for this job post',
+        ),
+      );
+
+      await expect(
+        controller.getJobApplications(
+          jobId,
+          userId,
+          new GetJobApplicationsQueryDto(),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('maps ApplicationValidationError to BadRequestException', async () => {
+      getJobApplicationsUseCase.execute.mockRejectedValue(
+        new ApplicationValidationError('limit must not exceed 50'),
+      );
+
+      await expect(
+        controller.getJobApplications(
+          jobId,
+          userId,
+          new GetJobApplicationsQueryDto(),
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('rethrows unexpected errors unchanged', async () => {
+      const unexpected = new Error('Database connection lost');
+      getJobApplicationsUseCase.execute.mockRejectedValue(unexpected);
+
+      await expect(
+        controller.getJobApplications(
+          jobId,
+          userId,
+          new GetJobApplicationsQueryDto(),
+        ),
+      ).rejects.toBe(unexpected);
+    });
+  });
+
+  describe('Recruiter hiring transitions (shortlist / accept / reject)', () => {
+    const jobId = '123e4567-e89b-42d3-a456-426614174000';
+    const applicationId = '223e4567-e89b-42d3-a456-426614174000';
+    const userId = 'user-uuid-1';
+    const updatedAt = new Date('2026-11-12T12:30:00.000Z');
+
+    it('protects shortlist, accept, and reject endpoints with JwtAuthGuard, RolesGuard, and Role.RECRUITER', () => {
+      for (const methodName of [
+        'shortlistApplication',
+        'acceptApplication',
+        'rejectApplication',
+      ] as const) {
+        const roles = reflector.get<Role[]>(
+          ROLES_KEY,
+          JobPostingController.prototype[methodName],
+        );
+        const guards = Reflect.getMetadata(
+          '__guards__',
+          JobPostingController.prototype[methodName],
+        );
+
+        expect(roles).toEqual([Role.RECRUITER]);
+        expect(guards).toBeDefined();
+        expect(guards).toContain(JwtAuthGuard);
+        expect(guards).toContain(RolesGuard);
+      }
+    });
+
+    it('delegates shortlistApplication and maps explicit response DTO', async () => {
+      shortlistJobApplicationUseCase.execute.mockResolvedValue({
+        applicationId,
+        jobPostId: jobId,
+        previousStatus: JobApplicationStatus.PENDING,
+        status: JobApplicationStatus.SHORTLISTED,
+        reasonCode: JobApplicationReasonCode.RECRUITER_SHORTLISTED,
+        jobStatus: JobStatus.OPEN,
+        updatedAt,
+      });
+
+      const dto = new UpdateJobApplicationStatusInputDto();
+      dto.reasonNote = 'Strong candidate';
+
+      const result = await controller.shortlistApplication(
+        jobId,
+        applicationId,
+        userId,
+        dto,
+      );
+
+      expect(shortlistJobApplicationUseCase.execute).toHaveBeenCalledWith({
+        userId,
+        jobPostId: jobId,
+        applicationId,
+        reasonNote: 'Strong candidate',
+      });
+      expect(result).toEqual({
+        applicationId,
+        jobPostId: jobId,
+        status: JobApplicationStatus.SHORTLISTED,
+        jobStatus: JobStatus.OPEN,
+        updatedAt,
+      });
+    });
+
+    it('delegates acceptApplication and returns filled / autoRejectedCount summary DTO', async () => {
+      acceptJobApplicationUseCase.execute.mockResolvedValue({
+        applicationId,
+        jobPostId: jobId,
+        previousStatus: JobApplicationStatus.SHORTLISTED,
+        status: JobApplicationStatus.ACCEPTED,
+        reasonCode: JobApplicationReasonCode.RECRUITER_ACCEPTED,
+        jobStatus: JobStatus.FILLED,
+        updatedAt,
+        workersNeeded: 2,
+        acceptedCount: 2,
+        jobFilled: true,
+        autoRejectedCount: 3,
+        autoRejectedApplicationIds: ['a-1', 'a-2', 'a-3'],
+      });
+
+      const result = await controller.acceptApplication(
+        jobId,
+        applicationId,
+        userId,
+      );
+
+      expect(acceptJobApplicationUseCase.execute).toHaveBeenCalledWith({
+        userId,
+        jobPostId: jobId,
+        applicationId,
+        reasonNote: undefined,
+      });
+      expect(result).toEqual({
+        applicationId,
+        jobPostId: jobId,
+        status: JobApplicationStatus.ACCEPTED,
+        jobStatus: JobStatus.FILLED,
+        workersNeeded: 2,
+        acceptedCount: 2,
+        jobFilled: true,
+        autoRejectedCount: 3,
+        updatedAt,
+      });
+      expect(result).not.toHaveProperty('autoRejectedApplicationIds');
+    });
+
+    it('delegates rejectApplication and maps explicit response DTO', async () => {
+      rejectJobApplicationUseCase.execute.mockResolvedValue({
+        applicationId,
+        jobPostId: jobId,
+        previousStatus: JobApplicationStatus.PENDING,
+        status: JobApplicationStatus.REJECTED,
+        reasonCode: JobApplicationReasonCode.RECRUITER_REJECTED,
+        jobStatus: JobStatus.PAUSED,
+        updatedAt,
+      });
+
+      const dto = new UpdateJobApplicationStatusInputDto();
+      dto.reasonNote = 'Overqualified';
+
+      const result = await controller.rejectApplication(
+        jobId,
+        applicationId,
+        userId,
+        dto,
+      );
+
+      expect(rejectJobApplicationUseCase.execute).toHaveBeenCalledWith({
+        userId,
+        jobPostId: jobId,
+        applicationId,
+        reasonNote: 'Overqualified',
+      });
+      expect(result).toEqual({
+        applicationId,
+        jobPostId: jobId,
+        status: JobApplicationStatus.REJECTED,
+        jobStatus: JobStatus.PAUSED,
+        updatedAt,
+      });
+    });
+
+    it('maps ApplicationConflictError to ConflictException (HTTP 409)', async () => {
+      acceptJobApplicationUseCase.execute.mockRejectedValue(
+        new ApplicationConflictError(
+          'Job has already reached its hiring capacity',
+        ),
+      );
+
+      await expect(
+        controller.acceptApplication(jobId, applicationId, userId),
+      ).rejects.toThrow(ConflictException);
     });
   });
 });

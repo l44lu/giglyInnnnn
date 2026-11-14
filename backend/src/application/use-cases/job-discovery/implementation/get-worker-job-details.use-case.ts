@@ -58,6 +58,7 @@ export class GetWorkerJobDetailsUseCase implements IGetWorkerJobDetailsUseCase {
         avatarUrl: user?.avatarUrl ?? null,
         location: user?.location ?? null,
         bio: user?.bio ?? null,
+        yearsExperience: job.recruiter.yearsExperience ?? null,
       });
     }
 

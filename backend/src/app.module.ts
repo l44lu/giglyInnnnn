@@ -138,6 +138,14 @@ import { IUpdateJobPostUseCase } from './application/use-cases/job-posting/inter
 import { UpdateJobPostUseCase } from './application/use-cases/job-posting/implementation/update-job-post.use-case';
 import { ITransitionJobPostStatusUseCase } from './application/use-cases/job-posting/interface/transition-job-post-status.use-case.interface';
 import { TransitionJobPostStatusUseCase } from './application/use-cases/job-posting/implementation/transition-job-post-status.use-case';
+import { IGetJobApplicationsUseCase } from './application/use-cases/job-posting/interface/get-job-applications.use-case.interface';
+import { GetJobApplicationsUseCase } from './application/use-cases/job-posting/implementation/get-job-applications.use-case';
+import { IShortlistJobApplicationUseCase } from './application/use-cases/job-posting/interface/shortlist-job-application.use-case.interface';
+import { ShortlistJobApplicationUseCase } from './application/use-cases/job-posting/implementation/shortlist-job-application.use-case';
+import { IAcceptJobApplicationUseCase } from './application/use-cases/job-posting/interface/accept-job-application.use-case.interface';
+import { AcceptJobApplicationUseCase } from './application/use-cases/job-posting/implementation/accept-job-application.use-case';
+import { IRejectJobApplicationUseCase } from './application/use-cases/job-posting/interface/reject-job-application.use-case.interface';
+import { RejectJobApplicationUseCase } from './application/use-cases/job-posting/implementation/reject-job-application.use-case';
 import { IFindOpenJobsUseCase } from './application/use-cases/job-discovery/interface/find-open-jobs.use-case.interface';
 import { FindOpenJobsUseCase } from './application/use-cases/job-discovery/implementation/find-open-jobs.use-case';
 import { IGetWorkerJobDetailsUseCase } from './application/use-cases/job-discovery/interface/get-worker-job-details.use-case.interface';
@@ -146,6 +154,12 @@ import { IReportRepository } from './domain/repositories/report.repository.inter
 import { PrismaReportRepository } from './infrastructure/repositories/prisma-report.repository';
 import { IReportJobUseCase } from './application/use-cases/job-discovery/interface/report-job.use-case.interface';
 import { ReportJobUseCase } from './application/use-cases/job-discovery/implementation/report-job.use-case';
+import { IJobApplicationRepository } from './domain/repositories/job-application.repository.interface';
+import { PrismaJobApplicationRepository } from './infrastructure/repositories/prisma-job-application.repository';
+import { IJobApplicationStatusHistoryRepository } from './domain/repositories/job-application-status-history.repository.interface';
+import { PrismaJobApplicationStatusHistoryRepository } from './infrastructure/repositories/prisma-job-application-status-history.repository';
+import { IApplyJobUseCase } from './application/use-cases/job-discovery/interface/apply-job.use-case.interface';
+import { ApplyJobUseCase } from './application/use-cases/job-discovery/implementation/apply-job.use-case';
 import { JobDiscoveryController } from './presentation/job-discovery/job-discovery.controller';
 
 @Module({
@@ -432,6 +446,22 @@ import { JobDiscoveryController } from './presentation/job-discovery/job-discove
       useClass: TransitionJobPostStatusUseCase,
     },
     {
+      provide: IGetJobApplicationsUseCase,
+      useClass: GetJobApplicationsUseCase,
+    },
+    {
+      provide: IShortlistJobApplicationUseCase,
+      useClass: ShortlistJobApplicationUseCase,
+    },
+    {
+      provide: IAcceptJobApplicationUseCase,
+      useClass: AcceptJobApplicationUseCase,
+    },
+    {
+      provide: IRejectJobApplicationUseCase,
+      useClass: RejectJobApplicationUseCase,
+    },
+    {
       provide: IFindOpenJobsUseCase,
       useClass: FindOpenJobsUseCase,
     },
@@ -446,6 +476,18 @@ import { JobDiscoveryController } from './presentation/job-discovery/job-discove
     {
       provide: IReportJobUseCase,
       useClass: ReportJobUseCase,
+    },
+    {
+      provide: IJobApplicationRepository,
+      useClass: PrismaJobApplicationRepository,
+    },
+    {
+      provide: IJobApplicationStatusHistoryRepository,
+      useClass: PrismaJobApplicationStatusHistoryRepository,
+    },
+    {
+      provide: IApplyJobUseCase,
+      useClass: ApplyJobUseCase,
     },
     AuthCookieService,
     JwtAuthGuard,

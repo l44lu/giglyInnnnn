@@ -148,4 +148,43 @@ export class JobPostEntity {
   isFilled(): boolean {
     return this.status === JobStatus.FILLED;
   }
+
+  /**
+   * Applications can be actively reviewed/managed only while the job is OPEN or PAUSED.
+   */
+  canManageApplications(): boolean {
+    return this.status === JobStatus.OPEN || this.status === JobStatus.PAUSED;
+  }
+
+  /**
+   * New hires can be accepted only when the job is OPEN and accepted count is below workersNeeded.
+   */
+  canAcceptHires(acceptedCount: number): boolean {
+    this.assertNonNegativeInteger(acceptedCount, 'acceptedCount');
+    return this.status === JobStatus.OPEN && acceptedCount < this.workersNeeded;
+  }
+
+  /**
+   * Job can become FILLED when currently OPEN and accepted worker count meets workersNeeded without exceeding capacity.
+   */
+  canBecomeFilled(acceptedCount: number): boolean {
+    this.assertNonNegativeInteger(acceptedCount, 'acceptedCount');
+    return (
+      this.status === JobStatus.OPEN && acceptedCount === this.workersNeeded
+    );
+  }
+
+  /**
+   * Returns true if acceptedCount strictly exceeds workersNeeded.
+   */
+  exceedsCapacity(acceptedCount: number): boolean {
+    this.assertNonNegativeInteger(acceptedCount, 'acceptedCount');
+    return acceptedCount > this.workersNeeded;
+  }
+
+  private assertNonNegativeInteger(value: number, fieldName: string): void {
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+      throw new Error(`${fieldName} must be a non-negative integer`);
+    }
+  }
 }

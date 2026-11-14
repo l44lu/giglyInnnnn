@@ -26,6 +26,7 @@ export class WorkerJobDetailsRecruiterDto {
   avatarUrl!: string | null;
   location!: string | null;
   bio!: string | null;
+  yearsExperience!: number | null;
 
   constructor(partial?: Partial<WorkerJobDetailsRecruiterDto>) {
     if (partial) {

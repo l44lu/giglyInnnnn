@@ -131,9 +131,15 @@ describe('Job Posting Feature (e2e)', () => {
 
   afterAll(async () => {
     try {
-      // 1. Delete all JobPost records created in this test suite and their skills
+      // 1. Delete all JobPost records created in this test suite and their dependent records
       for (const jobId of createdJobPostIds) {
         try {
+          await prismaService.jobApplicationStatusHistory.deleteMany({
+            where: { application: { jobPostId: jobId } },
+          });
+          await prismaService.jobApplication.deleteMany({
+            where: { jobPostId: jobId },
+          });
           await prismaService.jobPostSkill.deleteMany({
             where: { jobPostId: jobId },
           });
@@ -561,6 +567,211 @@ describe('Job Posting Feature (e2e)', () => {
       for (const item of items) {
         expect(item.status).toBe('draft');
       }
+    });
+  });
+
+  describe('G. PATCH /recruiter/jobs/:id/applications/:applicationId/{shortlist,accept,reject}', () => {
+    let hireJobId: string;
+    let app1Id: string;
+    let app2Id: string;
+    let app3Id: string;
+    const tempUserIds: string[] = [];
+    const tempWorkerProfileIds: string[] = [];
+
+    beforeAll(async () => {
+      const workerRole = await prismaService.appRole.findFirst({
+        where: { code: Role.WORKER },
+      });
+      if (!workerRole) {
+        throw new Error('Prerequisite setup failed: WORKER AppRole must exist');
+      }
+
+      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      for (let i = 1; i <= 3; i++) {
+        const user = await prismaService.user.create({
+          data: {
+            email: `e2e-hire-worker-${suffix}-${i}@example.com`,
+            passwordHash: 'test-hash-not-for-login',
+            roleId: workerRole.id,
+            firstName: `HireWorker${i}`,
+            lastName: 'E2E',
+          },
+        });
+        tempUserIds.push(user.id);
+
+        const profile = await prismaService.workerProfile.create({
+          data: { userId: user.id },
+        });
+        tempWorkerProfileIds.push(profile.id);
+      }
+
+      const job = await prismaService.jobPost.create({
+        data: {
+          recruiterId: recruiterUser.recruiterProfile.id,
+          categoryId: testCategory.id,
+          title: `E2E Hiring Flow Job ${suffix}`,
+          description:
+            'E2E test job for hiring workflow presentation endpoints',
+          workType: 'remote',
+          workersNeeded: 1,
+          paymentStructure: 'fixed',
+          budgetAmount: '300.00',
+          status: 'open',
+          adminReviewStatus: 'approved',
+        },
+      });
+      hireJobId = job.id;
+      createdJobPostIds.push(hireJobId);
+
+      const app1 = await prismaService.jobApplication.create({
+        data: {
+          jobPostId: hireJobId,
+          workerId: tempWorkerProfileIds[0],
+          status: 'pending',
+        },
+      });
+      const app2 = await prismaService.jobApplication.create({
+        data: {
+          jobPostId: hireJobId,
+          workerId: tempWorkerProfileIds[1],
+          status: 'pending',
+        },
+      });
+      const app3 = await prismaService.jobApplication.create({
+        data: {
+          jobPostId: hireJobId,
+          workerId: tempWorkerProfileIds[2],
+          status: 'pending',
+        },
+      });
+      app1Id = app1.id;
+      app2Id = app2.id;
+      app3Id = app3.id;
+    });
+
+    afterAll(async () => {
+      try {
+        if (hireJobId) {
+          await prismaService.jobApplicationStatusHistory.deleteMany({
+            where: { application: { jobPostId: hireJobId } },
+          });
+          await prismaService.jobApplication.deleteMany({
+            where: { jobPostId: hireJobId },
+          });
+        }
+        if (tempWorkerProfileIds.length > 0) {
+          await prismaService.workerProfile.deleteMany({
+            where: { id: { in: tempWorkerProfileIds } },
+          });
+        }
+        if (tempUserIds.length > 0) {
+          await prismaService.user.deleteMany({
+            where: { id: { in: tempUserIds } },
+          });
+        }
+      } catch (err) {
+        console.error('Failed to cleanup hiring flow E2E test data:', err);
+      }
+    });
+
+    it('returns 401 when unauthenticated', async () => {
+      const res = await request(httpServer).patch(
+        `/recruiter/jobs/${hireJobId}/applications/${app1Id}/shortlist`,
+      );
+      expect(res.status).toBe(401);
+    });
+
+    it('returns 403 when authenticated user has WORKER role', async () => {
+      const res = await request(httpServer)
+        .patch(`/recruiter/jobs/${hireJobId}/applications/${app1Id}/shortlist`)
+        .set('Cookie', [workerCookie]);
+      expect(res.status).toBe(403);
+    });
+
+    it('returns 400 when job id or applicationId is not a valid UUID', async () => {
+      const res = await request(httpServer)
+        .patch(`/recruiter/jobs/not-a-uuid/applications/${app1Id}/shortlist`)
+        .set('Cookie', [recruiterCookie]);
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 400 when non-whitelisted fields such as recruiterId are sent in request body', async () => {
+      const res = await request(httpServer)
+        .patch(`/recruiter/jobs/${hireJobId}/applications/${app1Id}/shortlist`)
+        .set('Cookie', [recruiterCookie])
+        .send({ recruiterId: '00000000-0000-0000-0000-000000000001' });
+      expect(res.status).toBe(400);
+    });
+
+    it('returns 404 when target application does not exist', async () => {
+      const missingId = '00000000-0000-0000-0000-000000000099';
+      const res = await request(httpServer)
+        .patch(
+          `/recruiter/jobs/${hireJobId}/applications/${missingId}/shortlist`,
+        )
+        .set('Cookie', [recruiterCookie]);
+      expect(res.status).toBe(404);
+    });
+
+    it('PATCH .../shortlist returns 200 and updates application status to shortlisted', async () => {
+      const res = await request(httpServer)
+        .patch(`/recruiter/jobs/${hireJobId}/applications/${app1Id}/shortlist`)
+        .set('Cookie', [recruiterCookie])
+        .send({ reasonNote: '  Strong fit  ' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toMatchObject({
+        applicationId: app1Id,
+        jobPostId: hireJobId,
+        status: 'shortlisted',
+        jobStatus: 'open',
+      });
+      expect(res.body.data.autoRejectedApplicationIds).toBeUndefined();
+    });
+
+    it('PATCH .../reject returns 200 and updates application status to rejected', async () => {
+      const res = await request(httpServer)
+        .patch(`/recruiter/jobs/${hireJobId}/applications/${app3Id}/reject`)
+        .set('Cookie', [recruiterCookie])
+        .send({ reasonNote: 'Role mismatch' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toMatchObject({
+        applicationId: app3Id,
+        jobPostId: hireJobId,
+        status: 'rejected',
+        jobStatus: 'open',
+      });
+    });
+
+    it('PATCH .../accept returns 200, fills the job, auto-rejects competing pending applicant, and omits internal IDs', async () => {
+      const res = await request(httpServer)
+        .patch(`/recruiter/jobs/${hireJobId}/applications/${app1Id}/accept`)
+        .set('Cookie', [recruiterCookie]);
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.data).toMatchObject({
+        applicationId: app1Id,
+        jobPostId: hireJobId,
+        status: 'accepted',
+        jobStatus: 'filled',
+        workersNeeded: 1,
+        acceptedCount: 1,
+        jobFilled: true,
+        autoRejectedCount: 1,
+      });
+      expect(res.body.data.autoRejectedApplicationIds).toBeUndefined();
+    });
+
+    it('returns 409 when transitioning an auto-rejected or already filled application', async () => {
+      const res = await request(httpServer)
+        .patch(`/recruiter/jobs/${hireJobId}/applications/${app2Id}/accept`)
+        .set('Cookie', [recruiterCookie]);
+
+      expect(res.status).toBe(409);
     });
   });
 });

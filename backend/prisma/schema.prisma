@@ -8,41 +8,42 @@ datasource db {
 }
 
 model User {
-  id                     String            @id @default(uuid())
-  email                  String            @unique
-  passwordHash           String
-  roleId                 String
-  firstName              String
-  lastName               String
-  phone                  String?
-  avatarUrl              String?
-  location               String?
-  bio                    String?
-  isVerified             Boolean           @default(false)
-  isBlocked              Boolean           @default(false)
-  isActive               Boolean           @default(true)
-  createdAt              DateTime          @default(now())
-  updatedAt              DateTime          @updatedAt
-  role                   AppRole           @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  permissionsGrantedByMe RolePermission[]  @relation("PermissionGranter")
-  adminActions           AdminAction[]     @relation("AdminActions")
-  targetedAdminActions   AdminAction[]     @relation("TargetAdminActions")
-  conversationsAsUser1   Conversation[]    @relation("Participant1")
-  conversationsAsUser2   Conversation[]    @relation("Participant2")
-  messages               Message[]
-  notifications          Notification[]
-  platformSettings       PlatformSetting[]
-  recruiterProfile       RecruiterProfile?
-  reportsAgainstUser     Report[]          @relation("ReportedUserReports")
-  filedReports           Report[]          @relation("ReporterReports")
-  resolvedReports        Report[]          @relation("ResolvedReports")
-  receivedReviews        Review[]          @relation("RevieweeReviews")
-  givenReviews           Review[]          @relation("ReviewerReviews")
-  receivedTransactions   Transaction[]     @relation("PayeeTransactions")
-  paidTransactions       Transaction[]     @relation("PayerTransactions")
-  workerProfile          WorkerProfile?
-  refreshTokens          RefreshToken[]
-  passwordResets         PasswordReset[]
+  id                       String                        @id @default(uuid())
+  email                    String                        @unique
+  passwordHash             String
+  roleId                   String
+  firstName                String
+  lastName                 String
+  phone                    String?
+  avatarUrl                String?
+  location                 String?
+  bio                      String?
+  isVerified               Boolean                       @default(false)
+  isBlocked                Boolean                       @default(false)
+  isActive                 Boolean                       @default(true)
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  role                     AppRole                       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  permissionsGrantedByMe   RolePermission[]              @relation("PermissionGranter")
+  adminActions             AdminAction[]                 @relation("AdminActions")
+  targetedAdminActions     AdminAction[]                 @relation("TargetAdminActions")
+  conversationsAsUser1     Conversation[]                @relation("Participant1")
+  conversationsAsUser2     Conversation[]                @relation("Participant2")
+  messages                 Message[]
+  notifications            Notification[]
+  platformSettings         PlatformSetting[]
+  recruiterProfile         RecruiterProfile?
+  reportsAgainstUser       Report[]                      @relation("ReportedUserReports")
+  filedReports             Report[]                      @relation("ReporterReports")
+  resolvedReports          Report[]                      @relation("ResolvedReports")
+  receivedReviews          Review[]                      @relation("RevieweeReviews")
+  givenReviews             Review[]                      @relation("ReviewerReviews")
+  receivedTransactions     Transaction[]                 @relation("PayeeTransactions")
+  paidTransactions         Transaction[]                 @relation("PayerTransactions")
+  workerProfile            WorkerProfile?
+  refreshTokens            RefreshToken[]
+  passwordResets           PasswordReset[]
+  applicationStatusChanges JobApplicationStatusHistory[] @relation("JobApplicationStatusChanges")
 
   @@index([roleId])
 }
@@ -167,19 +168,38 @@ model JobPostSkill {
 }
 
 model JobApplication {
-  id            String        @id @default(uuid())
+  id            String                        @id @default(uuid())
   jobPostId     String
   workerId      String
-  status        String        @default("pending")
-  expectedPay   Decimal?      @db.Decimal(10, 2)
-  availableDate DateTime?     @db.Date
-  appliedAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-  jobPost       JobPost       @relation(fields: [jobPostId], references: [id])
-  worker        WorkerProfile @relation(fields: [workerId], references: [id])
+  status        String                        @default("pending")
+  expectedPay   Decimal?                      @db.Decimal(10, 2)
+  availableDate DateTime?                     @db.Date
+  appliedAt     DateTime                      @default(now())
+  updatedAt     DateTime                      @updatedAt
+  jobPost       JobPost                       @relation(fields: [jobPostId], references: [id])
+  worker        WorkerProfile                 @relation(fields: [workerId], references: [id])
   transactions  Transaction[]
+  statusHistory JobApplicationStatusHistory[]
 
   @@unique([jobPostId, workerId])
+  @@index([jobPostId, status])
+  @@index([workerId, status])
+}
+
+model JobApplicationStatusHistory {
+  id              String         @id @default(uuid())
+  applicationId   String
+  fromStatus      String?
+  toStatus        String
+  reasonCode      String
+  reasonNote      String?
+  changedByUserId String?
+  metadata        Json?
+  createdAt       DateTime       @default(now())
+  application     JobApplication @relation(fields: [applicationId], references: [id], onDelete: Restrict)
+  changedBy       User?          @relation("JobApplicationStatusChanges", fields: [changedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId, createdAt])
 }
 
 model Transaction {
@@ -370,19 +390,19 @@ model Otp {
 }
 
 model AppRole {
-  id                         String           @id @default(uuid())
-  code                       String           @unique
+  id                         String   @id @default(uuid())
+  code                       String   @unique
   name                       String
   description                String?
-  isSystem                   Boolean          @default(false)
-  isActive                   Boolean          @default(true)
-  isAssignableOnRegistration Boolean          @default(false)
-  createdAt                  DateTime         @default(now())
-  updatedAt                  DateTime         @updatedAt
+  isSystem                   Boolean  @default(false)
+  isActive                   Boolean  @default(true)
+  isAssignableOnRegistration Boolean  @default(false)
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 
-  users                      User[]
-  otps                       Otp[]
-  rolePermissions            RolePermission[]
+  users           User[]
+  otps            Otp[]
+  rolePermissions RolePermission[]
 
   @@index([code])
   @@index([isActive])
@@ -390,13 +410,13 @@ model AppRole {
 }
 
 model Permission {
-  id              String           @id @default(uuid())
-  code            String           @unique
-  name            String
-  module          String
-  description     String?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  id          String   @id @default(uuid())
+  code        String   @unique
+  name        String
+  module      String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   rolePermissions RolePermission[]
 
@@ -405,15 +425,15 @@ model Permission {
 }
 
 model RolePermission {
-  id           String     @id @default(uuid())
+  id           String   @id @default(uuid())
   roleId       String
   permissionId String
-  grantedAt    DateTime   @default(now())
+  grantedAt    DateTime @default(now())
   grantedBy    String?
 
-  role         AppRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
-  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
-  granter      User?      @relation("PermissionGranter", fields: [grantedBy], references: [id], onDelete: SetNull)
+  role       AppRole    @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+  granter    User?      @relation("PermissionGranter", fields: [grantedBy], references: [id], onDelete: SetNull)
 
   @@unique([roleId, permissionId])
   @@index([roleId])

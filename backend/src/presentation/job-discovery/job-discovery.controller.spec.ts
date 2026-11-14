@@ -12,6 +12,7 @@ import { JobDiscoveryController } from './job-discovery.controller';
 import { IFindOpenJobsUseCase } from '../../application/use-cases/job-discovery/interface/find-open-jobs.use-case.interface';
 import { IGetWorkerJobDetailsUseCase } from '../../application/use-cases/job-discovery/interface/get-worker-job-details.use-case.interface';
 import { IReportJobUseCase } from '../../application/use-cases/job-discovery/interface/report-job.use-case.interface';
+import { IApplyJobUseCase } from '../../application/use-cases/job-discovery/interface/apply-job.use-case.interface';
 import { FindJobsQueryDto } from '../../application/dto/job-discovery/find-jobs-query.dto';
 import {
   FindJobsResponseDto,
@@ -26,6 +27,9 @@ import {
 } from '../../application/dto/job-discovery/worker-job-details-response.dto';
 import { ReportJobInputDto } from '../../application/dto/job-discovery/report-job-input.dto';
 import { ReportJobResponseDto } from '../../application/dto/job-discovery/report-job-response.dto';
+import { ApplyJobInputDto } from '../../application/dto/job-discovery/apply-job-input.dto';
+import { JobApplicationResponseDto } from '../../application/dto/job-discovery/job-application-response.dto';
+import { JobApplicationStatus } from '../../domain/enums/job-application-status.enum';
 import { Role } from '../../domain/enums/role.enum';
 import { WorkType } from '../../domain/enums/work-type.enum';
 import { PaymentStructure } from '../../domain/enums/payment-structure.enum';
@@ -49,6 +53,7 @@ describe('JobDiscoveryController', () => {
   let findOpenJobsUseCase: jest.Mocked<IFindOpenJobsUseCase>;
   let getWorkerJobDetailsUseCase: jest.Mocked<IGetWorkerJobDetailsUseCase>;
   let reportJobUseCase: jest.Mocked<IReportJobUseCase>;
+  let applyJobUseCase: jest.Mocked<IApplyJobUseCase>;
   let reflector: Reflector;
   let rolesGuard: RolesGuard;
 
@@ -143,6 +148,9 @@ describe('JobDiscoveryController', () => {
     reportJobUseCase = {
       execute: jest.fn(),
     };
+    applyJobUseCase = {
+      execute: jest.fn(),
+    };
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [JobDiscoveryController],
@@ -158,6 +166,10 @@ describe('JobDiscoveryController', () => {
         {
           provide: IReportJobUseCase,
           useValue: reportJobUseCase,
+        },
+        {
+          provide: IApplyJobUseCase,
+          useValue: applyJobUseCase,
         },
         {
           provide: IUserRepository,
@@ -448,6 +460,114 @@ describe('JobDiscoveryController', () => {
       await expect(
         controller.reportJob(validJobId, reporterId, mockInputDto),
       ).rejects.toThrow('Unexpected disk failure');
+    });
+  });
+
+  describe('applyJob', () => {
+    const validJobId = '77777777-7777-4777-8777-777777777777';
+    const workerUserId = 'worker-uuid-123';
+    const mockInputDto: ApplyJobInputDto = {
+      expectedPay: 125.0,
+      availableDate: '2099-10-15',
+    };
+
+    const mockResponseDto: JobApplicationResponseDto = {
+      id: 'app-uuid-999',
+      jobPostId: validJobId,
+      status: JobApplicationStatus.PENDING,
+      expectedPay: 125.0,
+      availableDate: new Date('2099-10-15T00:00:00.000Z'),
+      appliedAt: new Date('2026-11-11T12:00:00.000Z'),
+      updatedAt: new Date('2026-11-11T12:00:00.000Z'),
+    };
+
+    it('delegates to applyJobUseCase.execute and returns created application DTO', async () => {
+      applyJobUseCase.execute.mockResolvedValue(mockResponseDto);
+
+      const result = await controller.applyJob(
+        validJobId,
+        workerUserId,
+        mockInputDto,
+      );
+
+      expect(applyJobUseCase.execute).toHaveBeenCalledWith(
+        workerUserId,
+        validJobId,
+        mockInputDto,
+      );
+      expect(result).toEqual(mockResponseDto);
+    });
+
+    it('handles omitted body gracefully', async () => {
+      applyJobUseCase.execute.mockResolvedValue({
+        ...mockResponseDto,
+        expectedPay: null,
+        availableDate: null,
+      });
+
+      const result = await controller.applyJob(
+        validJobId,
+        workerUserId,
+        undefined,
+      );
+
+      expect(applyJobUseCase.execute).toHaveBeenCalledWith(
+        workerUserId,
+        validJobId,
+        undefined,
+      );
+      expect(result.expectedPay).toBeNull();
+      expect(result.availableDate).toBeNull();
+    });
+
+    it('maps ApplicationValidationError to BadRequestException (400)', async () => {
+      applyJobUseCase.execute.mockRejectedValue(
+        new ApplicationValidationError('expectedPay must be greater than 0'),
+      );
+
+      await expect(
+        controller.applyJob(validJobId, workerUserId, mockInputDto),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('maps ApplicationNotFoundError to NotFoundException (404)', async () => {
+      applyJobUseCase.execute.mockRejectedValue(
+        new ApplicationNotFoundError('Job post not found'),
+      );
+
+      await expect(
+        controller.applyJob(validJobId, workerUserId, mockInputDto),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('maps ApplicationAuthorizationError to ForbiddenException (403)', async () => {
+      applyJobUseCase.execute.mockRejectedValue(
+        new ApplicationAuthorizationError('Worker account is restricted'),
+      );
+
+      await expect(
+        controller.applyJob(validJobId, workerUserId, mockInputDto),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('maps ApplicationConflictError to ConflictException (409)', async () => {
+      applyJobUseCase.execute.mockRejectedValue(
+        new ApplicationConflictError('You have already applied for this job'),
+      );
+
+      await expect(
+        controller.applyJob(validJobId, workerUserId, mockInputDto),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('rethrows unexpected errors', async () => {
+      applyJobUseCase.execute.mockRejectedValue(
+        new Error('Unexpected database failure'),
+      );
+
+      await expect(
+        controller.applyJob(validJobId, workerUserId, mockInputDto),
+      ).rejects.toThrow('Unexpected database failure');
     });
   });
 

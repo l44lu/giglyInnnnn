@@ -376,4 +376,95 @@ describe('JobPostEntity', () => {
     expect(typeof entity.budgetAmount).toBe('number');
     expect(typeof entity.hourlyRate).toBe('number');
   });
+
+  describe('Feature 4 hiring invariants', () => {
+    it.each([
+      { status: JobStatus.OPEN, expected: true },
+      { status: JobStatus.PAUSED, expected: true },
+      { status: JobStatus.DRAFT, expected: false },
+      { status: JobStatus.FILLED, expected: false },
+      { status: JobStatus.CANCELLED, expected: false },
+      { status: JobStatus.COMPLETED, expected: false },
+    ])(
+      'canManageApplications() returns $expected when job status is $status',
+      ({ status, expected }) => {
+        const job = new JobPostEntity({ status });
+        expect(job.canManageApplications()).toBe(expected);
+      },
+    );
+
+    it('canAcceptHires() returns true only when OPEN and acceptedCount < workersNeeded', () => {
+      const openJob = new JobPostEntity({
+        status: JobStatus.OPEN,
+        workersNeeded: 2,
+      });
+      expect(openJob.canAcceptHires(0)).toBe(true);
+      expect(openJob.canAcceptHires(1)).toBe(true);
+      expect(openJob.canAcceptHires(2)).toBe(false);
+      expect(openJob.canAcceptHires(3)).toBe(false);
+
+      const pausedJob = new JobPostEntity({
+        status: JobStatus.PAUSED,
+        workersNeeded: 2,
+      });
+      expect(pausedJob.canAcceptHires(0)).toBe(false);
+
+      const filledJob = new JobPostEntity({
+        status: JobStatus.FILLED,
+        workersNeeded: 2,
+      });
+      expect(filledJob.canAcceptHires(1)).toBe(false);
+    });
+
+    it('canBecomeFilled() returns true only when OPEN and acceptedCount equals workersNeeded', () => {
+      const openJob = new JobPostEntity({
+        status: JobStatus.OPEN,
+        workersNeeded: 2,
+      });
+      expect(openJob.canBecomeFilled(0)).toBe(false);
+      expect(openJob.canBecomeFilled(1)).toBe(false);
+      expect(openJob.canBecomeFilled(2)).toBe(true);
+      expect(openJob.canBecomeFilled(3)).toBe(false);
+
+      const pausedJob = new JobPostEntity({
+        status: JobStatus.PAUSED,
+        workersNeeded: 2,
+      });
+      expect(pausedJob.canBecomeFilled(2)).toBe(false);
+
+      const alreadyFilledJob = new JobPostEntity({
+        status: JobStatus.FILLED,
+        workersNeeded: 2,
+      });
+      expect(alreadyFilledJob.canBecomeFilled(2)).toBe(false);
+    });
+
+    it('exceedsCapacity() detects when acceptedCount > workersNeeded', () => {
+      const job = new JobPostEntity({
+        status: JobStatus.OPEN,
+        workersNeeded: 2,
+      });
+      expect(job.exceedsCapacity(0)).toBe(false);
+      expect(job.exceedsCapacity(1)).toBe(false);
+      expect(job.exceedsCapacity(2)).toBe(false);
+      expect(job.exceedsCapacity(3)).toBe(true);
+    });
+
+    it('throws when acceptedCount is negative or not an integer', () => {
+      const job = new JobPostEntity({
+        status: JobStatus.OPEN,
+        workersNeeded: 2,
+      });
+
+      expect(() => job.canAcceptHires(-1)).toThrow(
+        'acceptedCount must be a non-negative integer',
+      );
+      expect(() => job.canBecomeFilled(1.5)).toThrow(
+        'acceptedCount must be a non-negative integer',
+      );
+      expect(() => job.exceedsCapacity(NaN)).toThrow(
+        'acceptedCount must be a non-negative integer',
+      );
+    });
+  });
 });

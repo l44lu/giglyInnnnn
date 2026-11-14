@@ -8,6 +8,10 @@ import { JobStatus } from '../../domain/enums/job-status.enum';
 import { WorkType } from '../../domain/enums/work-type.enum';
 import { PaymentStructure } from '../../domain/enums/payment-structure.enum';
 import { JobSortBy } from '../../domain/repositories/job-post.repository.interface';
+import {
+  ApplicationConflictError,
+  ApplicationNotFoundError,
+} from '../../application/errors/application.errors';
 import { Prisma } from '@prisma/client';
 
 describe('PrismaJobPostRepository', () => {
@@ -85,6 +89,16 @@ describe('PrismaJobPostRepository', () => {
 
   beforeEach(() => {
     txMock = {
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          id: 'job-post-uuid-1',
+          status: 'draft',
+          workersNeeded: 2,
+        },
+      ]),
+      jobApplication: {
+        count: jest.fn().mockResolvedValue(0),
+      },
       jobPost: {
         create: jest.fn(),
         update: jest.fn(),
@@ -636,6 +650,85 @@ describe('PrismaJobPostRepository', () => {
       ).rejects.toThrow(
         'Failed to retrieve updated job post with id: job-post-uuid-1',
       );
+    });
+
+    it('locks JobPost FOR UPDATE and rejects reducing workersNeeded below acceptedCount', async () => {
+      txMock.$queryRaw.mockResolvedValueOnce([
+        {
+          id: 'job-post-uuid-1',
+          status: JobStatus.OPEN,
+          workersNeeded: 3,
+        },
+      ]);
+      txMock.jobApplication.count.mockResolvedValueOnce(2);
+
+      await expect(
+        repository.updateWithSkills(
+          'job-post-uuid-1',
+          { workersNeeded: 1 },
+          [],
+        ),
+      ).rejects.toThrow(ApplicationConflictError);
+
+      expect(txMock.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(txMock.jobApplication.count).toHaveBeenCalledWith({
+        where: {
+          jobPostId: 'job-post-uuid-1',
+          status: 'accepted',
+        },
+      });
+      expect(txMock.jobPost.update).not.toHaveBeenCalled();
+    });
+
+    it('allows reducing workersNeeded when new value equals acceptedCount and rejects filled jobs', async () => {
+      txMock.$queryRaw.mockResolvedValueOnce([
+        {
+          id: 'job-post-uuid-1',
+          status: JobStatus.OPEN,
+          workersNeeded: 3,
+        },
+      ]);
+      txMock.jobApplication.count.mockResolvedValueOnce(2);
+      txMock.jobPost.update.mockResolvedValueOnce({
+        ...mockScalarJobRecord,
+        status: JobStatus.OPEN,
+        workersNeeded: 2,
+      });
+      txMock.jobPostSkill.deleteMany.mockResolvedValueOnce({ count: 0 });
+      txMock.jobPost.findUnique.mockResolvedValueOnce({
+        ...mockHydratedJobRecord,
+        status: JobStatus.OPEN,
+        workersNeeded: 2,
+        skills: [],
+      });
+
+      const updated = await repository.updateWithSkills(
+        'job-post-uuid-1',
+        { workersNeeded: 2 },
+        [],
+      );
+      expect(updated.workersNeeded).toBe(2);
+
+      txMock.$queryRaw.mockResolvedValueOnce([
+        {
+          id: 'job-post-uuid-1',
+          status: JobStatus.FILLED,
+          workersNeeded: 2,
+        },
+      ]);
+
+      await expect(
+        repository.updateWithSkills(
+          'job-post-uuid-1',
+          { workersNeeded: 1 },
+          [],
+        ),
+      ).rejects.toThrow(ApplicationConflictError);
+
+      txMock.$queryRaw.mockResolvedValueOnce([]);
+      await expect(
+        repository.updateWithSkills('missing-job-id', { title: 'X' }, []),
+      ).rejects.toThrow(ApplicationNotFoundError);
     });
   });
 

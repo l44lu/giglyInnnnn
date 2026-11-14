@@ -17,6 +17,8 @@ import { HttpExceptionFilter } from '../filters/http-exception.filter';
 import { IFindOpenJobsUseCase } from '../../application/use-cases/job-discovery/interface/find-open-jobs.use-case.interface';
 import { IGetWorkerJobDetailsUseCase } from '../../application/use-cases/job-discovery/interface/get-worker-job-details.use-case.interface';
 import { IReportJobUseCase } from '../../application/use-cases/job-discovery/interface/report-job.use-case.interface';
+import { IApplyJobUseCase } from '../../application/use-cases/job-discovery/interface/apply-job.use-case.interface';
+import { JobApplicationStatus } from '../../domain/enums/job-application-status.enum';
 import {
   FindJobsResponseDto,
   JobDiscoveryItemDto,
@@ -50,6 +52,7 @@ describe('JobDiscoveryController (HTTP Pipeline Integration)', () => {
   let findOpenJobsUseCase: { execute: jest.Mock };
   let getWorkerJobDetailsUseCase: { execute: jest.Mock };
   let reportJobUseCase: { execute: jest.Mock };
+  let applyJobUseCase: { execute: jest.Mock };
   let tokenService: JwtTokenService;
 
   let workerToken: string;
@@ -322,6 +325,22 @@ describe('JobDiscoveryController (HTTP Pipeline Integration)', () => {
       }),
     };
 
+    applyJobUseCase = {
+      execute: jest.fn().mockImplementation((_userId, jobId, dto) => {
+        return Promise.resolve({
+          id: 'job-app-uuid-1',
+          jobPostId: jobId,
+          status: JobApplicationStatus.PENDING,
+          expectedPay: dto?.expectedPay ?? null,
+          availableDate: dto?.availableDate
+            ? new Date(dto.availableDate + 'T00:00:00.000Z')
+            : null,
+          appliedAt: new Date('2026-11-11T12:00:00.000Z'),
+          updatedAt: new Date('2026-11-11T12:00:00.000Z'),
+        });
+      }),
+    };
+
     const moduleRef: TestingModule = await Test.createTestingModule({
       controllers: [JobDiscoveryController],
       providers: [
@@ -336,6 +355,10 @@ describe('JobDiscoveryController (HTTP Pipeline Integration)', () => {
         {
           provide: IReportJobUseCase,
           useValue: reportJobUseCase,
+        },
+        {
+          provide: IApplyJobUseCase,
+          useValue: applyJobUseCase,
         },
         {
           provide: ITokenService,
@@ -389,6 +412,19 @@ describe('JobDiscoveryController (HTTP Pipeline Integration)', () => {
         jobPostId,
         status: 'pending',
         createdAt: new Date('2026-11-10T10:00:00Z'),
+      });
+    });
+    applyJobUseCase.execute.mockImplementation((_userId, jobId, dto) => {
+      return Promise.resolve({
+        id: 'job-app-uuid-1',
+        jobPostId: jobId,
+        status: JobApplicationStatus.PENDING,
+        expectedPay: dto?.expectedPay ?? null,
+        availableDate: dto?.availableDate
+          ? new Date(dto.availableDate + 'T00:00:00.000Z')
+          : null,
+        appliedAt: new Date('2026-11-11T12:00:00.000Z'),
+        updatedAt: new Date('2026-11-11T12:00:00.000Z'),
       });
     });
     findOpenJobsUseCase.execute.mockImplementation(
@@ -1246,6 +1282,385 @@ describe('JobDiscoveryController (HTTP Pipeline Integration)', () => {
       expect(res.body.success).toBe(false);
       expect(res.body.statusCode).toBe(413);
       expect(res.body.message).toContain('File too large');
+    });
+  });
+
+  // =========================================================================
+  // Category 4: Apply to Job (POST /worker/jobs/:id/apply)
+  // =========================================================================
+  describe('POST /worker/jobs/:id/apply', () => {
+    const validJobId = 'e0000000-0000-4000-8000-000000000001';
+
+    describe('1. Successful Application & Optional Payload Handling', () => {
+      it('creates job application with full valid payload and returns 201', async () => {
+        const payload = {
+          expectedPay: 125.5,
+          availableDate: '2099-10-15',
+        };
+
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send(payload)
+          .expect(201);
+
+        expect(res.body.success).toBe(true);
+        expect(res.body.statusCode).toBe(201);
+        expect(res.body.message).toBe('Request successful');
+        expect(res.body.data).toBeDefined();
+        expect(res.body.data.id).toBe('job-app-uuid-1');
+        expect(res.body.data.jobPostId).toBe(validJobId);
+        expect(res.body.data.status).toBe('pending');
+        expect(res.body.data.expectedPay).toBe(125.5);
+        expect(res.body.data.availableDate).toContain('2099-10-15');
+
+        // Privacy assertion: workerId must NEVER be exposed
+        expect(res.body.data.workerId).toBeUndefined();
+
+        expect(applyJobUseCase.execute).toHaveBeenCalledWith(
+          workerUser.id,
+          validJobId,
+          expect.objectContaining({
+            expectedPay: 125.5,
+            availableDate: '2099-10-15',
+          }),
+        );
+      });
+
+      it('creates job application with empty body {} and returns 201', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({})
+          .expect(201);
+
+        expect(res.body.success).toBe(true);
+        expect(res.body.statusCode).toBe(201);
+        expect(res.body.data.status).toBe('pending');
+        expect(res.body.data.expectedPay).toBeNull();
+        expect(res.body.data.availableDate).toBeNull();
+        expect(res.body.data.workerId).toBeUndefined();
+
+        expect(applyJobUseCase.execute).toHaveBeenCalledWith(
+          workerUser.id,
+          validJobId,
+          expect.any(Object),
+        );
+      });
+
+      it('creates job application with omitted request body and returns 201', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .expect(201);
+
+        expect(res.body.success).toBe(true);
+        expect(res.body.statusCode).toBe(201);
+        expect(res.body.data.status).toBe('pending');
+        expect(res.body.data.workerId).toBeUndefined();
+      });
+
+      it('accepts null values for optional payload fields', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: null, availableDate: null })
+          .expect(201);
+
+        expect(res.body.success).toBe(true);
+        expect(res.body.statusCode).toBe(201);
+        expect(res.body.data.expectedPay).toBeNull();
+        expect(res.body.data.availableDate).toBeNull();
+      });
+    });
+
+    describe('2. Authentication and Authorization Guard Verification', () => {
+      it('rejects unauthenticated request missing cookie with 401', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .send({ expectedPay: 100 })
+          .expect(401);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('Authentication token is missing');
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects invalid or forged JWT token with 401', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=invalid.jwt.token`)
+          .send({ expectedPay: 100 })
+          .expect(401);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('Invalid or expired token');
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects blocked worker account with 401', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${blockedWorkerToken}`)
+          .send({ expectedPay: 100 })
+          .expect(401);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('User account is inactive or blocked');
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects RECRUITER account with 403 Forbidden', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${recruiterToken}`)
+          .send({ expectedPay: 100 })
+          .expect(403);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.statusCode).toBe(403);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects ADMIN account with 403 Forbidden', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${adminToken}`)
+          .send({ expectedPay: 100 })
+          .expect(403);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.statusCode).toBe(403);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('3. Route Parameter & DTO Validation', () => {
+      it('rejects non-UUID job id with 400 Bad Request', async () => {
+        const res = await request(app.getHttpServer())
+          .post('/worker/jobs/not-a-valid-uuid/apply')
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 100 })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toContain('Validation failed');
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects zero expectedPay with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 0 })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects negative expectedPay with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: -20 })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects expectedPay exceeding 99999999.99 with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 100000000 })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects expectedPay with more than 2 decimal places with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 120.555 })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects invalid availableDate format with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ availableDate: '2099/12/31' })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects availableDate in the past with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ availableDate: '2020-01-01' })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects non-existent calendar date such as Feb 31 with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ availableDate: '2099-02-31' })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('accepts local today in a negative UTC offset across UTC midnight via timezoneOffsetMinutes', async () => {
+        jest.useFakeTimers({ doNotFake: ['nextTick', 'setImmediate'] });
+        jest.setSystemTime(new Date('2026-11-12T04:00:00.000Z'));
+        try {
+          const res = await request(app.getHttpServer())
+            .post(`/worker/jobs/${validJobId}/apply`)
+            .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+            .send({ availableDate: '2026-11-11', timezoneOffsetMinutes: 480 })
+            .expect(201);
+
+          expect(res.body.success).toBe(true);
+          expect(applyJobUseCase.execute).toHaveBeenCalledWith(
+            workerUser.id,
+            validJobId,
+            expect.objectContaining({
+              availableDate: '2026-11-11',
+              timezoneOffsetMinutes: 480,
+            }),
+          );
+        } finally {
+          jest.useRealTimers();
+        }
+      });
+
+      it('rejects out-of-range timezoneOffsetMinutes with 400', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ availableDate: '2026-11-10', timezoneOffsetMinutes: 1440 })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('4. Security & Non-Whitelisted Payload Rejection', () => {
+      it('rejects client-supplied workerId with 400 Bad Request', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ workerId: 'malicious-worker-uuid' })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.errors || [res.body.message]).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('property workerId should not exist'),
+          ]),
+        );
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+
+      it('rejects client-supplied status with 400 Bad Request', async () => {
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ status: 'accepted' })
+          .expect(400);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.errors || [res.body.message]).toEqual(
+          expect.arrayContaining([
+            expect.stringContaining('property status should not exist'),
+          ]),
+        );
+        expect(applyJobUseCase.execute).not.toHaveBeenCalled();
+      });
+    });
+
+    describe('5. Application Layer Error Mapping', () => {
+      it('maps missing worker profile to 404 Not Found', async () => {
+        applyJobUseCase.execute.mockRejectedValueOnce(
+          new ApplicationNotFoundError(
+            'Worker profile not found. Please complete your profile before applying.',
+          ),
+        );
+
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 100 })
+          .expect(404);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe(
+          'Worker profile not found. Please complete your profile before applying.',
+        );
+      });
+
+      it('maps missing job post to 404 Not Found', async () => {
+        applyJobUseCase.execute.mockRejectedValueOnce(
+          new ApplicationNotFoundError('Job post not found'),
+        );
+
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 100 })
+          .expect(404);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('Job post not found');
+      });
+
+      it('maps non-OPEN job to 409 Conflict', async () => {
+        applyJobUseCase.execute.mockRejectedValueOnce(
+          new ApplicationConflictError(
+            'Cannot apply to a job that is not open',
+          ),
+        );
+
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 100 })
+          .expect(409);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('Cannot apply to a job that is not open');
+      });
+
+      it('maps duplicate application to 409 Conflict', async () => {
+        applyJobUseCase.execute.mockRejectedValueOnce(
+          new ApplicationConflictError('You have already applied for this job'),
+        );
+
+        const res = await request(app.getHttpServer())
+          .post(`/worker/jobs/${validJobId}/apply`)
+          .set('Cookie', `${ACCESS_TOKEN_COOKIE_NAME}=${workerToken}`)
+          .send({ expectedPay: 100 })
+          .expect(409);
+
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe('You have already applied for this job');
+      });
     });
   });
 });

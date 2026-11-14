@@ -34,6 +34,15 @@ import { IUpdateJobPostUseCase } from './application/use-cases/job-posting/inter
 import { UpdateJobPostUseCase } from './application/use-cases/job-posting/implementation/update-job-post.use-case';
 import { ITransitionJobPostStatusUseCase } from './application/use-cases/job-posting/interface/transition-job-post-status.use-case.interface';
 import { TransitionJobPostStatusUseCase } from './application/use-cases/job-posting/implementation/transition-job-post-status.use-case';
+import { IGetJobApplicationsUseCase } from './application/use-cases/job-posting/interface/get-job-applications.use-case.interface';
+import { GetJobApplicationsUseCase } from './application/use-cases/job-posting/implementation/get-job-applications.use-case';
+import { IShortlistJobApplicationUseCase } from './application/use-cases/job-posting/interface/shortlist-job-application.use-case.interface';
+import { ShortlistJobApplicationUseCase } from './application/use-cases/job-posting/implementation/shortlist-job-application.use-case';
+import { IAcceptJobApplicationUseCase } from './application/use-cases/job-posting/interface/accept-job-application.use-case.interface';
+import { AcceptJobApplicationUseCase } from './application/use-cases/job-posting/implementation/accept-job-application.use-case';
+import { IRejectJobApplicationUseCase } from './application/use-cases/job-posting/interface/reject-job-application.use-case.interface';
+import { RejectJobApplicationUseCase } from './application/use-cases/job-posting/implementation/reject-job-application.use-case';
+import { JobPostingController } from './presentation/job-posting/job-posting.controller';
 import { IFindOpenJobsUseCase } from './application/use-cases/job-discovery/interface/find-open-jobs.use-case.interface';
 import { FindOpenJobsUseCase } from './application/use-cases/job-discovery/implementation/find-open-jobs.use-case';
 import { IGetWorkerJobDetailsUseCase } from './application/use-cases/job-discovery/interface/get-worker-job-details.use-case.interface';
@@ -183,6 +192,38 @@ describe('AppModule DI Registration', () => {
     expect(useCase).toBeInstanceOf(TransitionJobPostStatusUseCase);
   });
 
+  it('should resolve IGetJobApplicationsUseCase to GetJobApplicationsUseCase', () => {
+    const useCase = module.get<IGetJobApplicationsUseCase>(
+      IGetJobApplicationsUseCase,
+    );
+    expect(useCase).toBeDefined();
+    expect(useCase).toBeInstanceOf(GetJobApplicationsUseCase);
+  });
+
+  it('should resolve IShortlistJobApplicationUseCase to ShortlistJobApplicationUseCase', () => {
+    const useCase = module.get<IShortlistJobApplicationUseCase>(
+      IShortlistJobApplicationUseCase,
+    );
+    expect(useCase).toBeDefined();
+    expect(useCase).toBeInstanceOf(ShortlistJobApplicationUseCase);
+  });
+
+  it('should resolve IAcceptJobApplicationUseCase to AcceptJobApplicationUseCase', () => {
+    const useCase = module.get<IAcceptJobApplicationUseCase>(
+      IAcceptJobApplicationUseCase,
+    );
+    expect(useCase).toBeDefined();
+    expect(useCase).toBeInstanceOf(AcceptJobApplicationUseCase);
+  });
+
+  it('should resolve IRejectJobApplicationUseCase to RejectJobApplicationUseCase', () => {
+    const useCase = module.get<IRejectJobApplicationUseCase>(
+      IRejectJobApplicationUseCase,
+    );
+    expect(useCase).toBeDefined();
+    expect(useCase).toBeInstanceOf(RejectJobApplicationUseCase);
+  });
+
   it('should resolve IFindOpenJobsUseCase to FindOpenJobsUseCase', () => {
     const useCase = module.get<IFindOpenJobsUseCase>(IFindOpenJobsUseCase);
     expect(useCase).toBeDefined();
@@ -215,5 +256,11 @@ describe('AppModule DI Registration', () => {
     );
     expect(controller).toBeDefined();
     expect(controller).toBeInstanceOf(JobDiscoveryController);
+  });
+
+  it('should resolve JobPostingController', () => {
+    const controller = module.get<JobPostingController>(JobPostingController);
+    expect(controller).toBeDefined();
+    expect(controller).toBeInstanceOf(JobPostingController);
   });
 });
